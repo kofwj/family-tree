@@ -1,0 +1,49 @@
+# OS / editor
+.DS_Store
+*.swp
+*.swo
+.idea/
+.vscode/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+*.p12
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Node / frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+node_modules/
+dist/
+
+# Runtime data: contains private family records and backups
+data/*.db
+data/*.sqlite
+data/*.sqlite3
+data/backups/
+data/member-photos/
+backups/
+
+# Import/export runtime files
+import/*.xlsx
+import/*.xls
+*.ged
+
+# Generated templates / temp helper patches
+data/members-import-template.xlsx
+.tmp_*.py
+
+# Logs
+*.log

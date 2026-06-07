@@ -1,0 +1,29 @@
+services:
+  backend:
+    build: ./backend
+    container_name: family-tree-backend
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=sqlite:////app/data/family.db
+      - JWT_SECRET=${JWT_SECRET:?set JWT_SECRET in .env}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:?set ADMIN_PASSWORD in .env}
+      - CORS_ORIGIN=${CORS_ORIGIN:-http://localhost:8088}
+    volumes:
+      - ./data:/app/data
+      - ./import:/app/import:ro
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:3000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  frontend:
+    build: ./frontend
+    container_name: family-tree-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "8088:80"
