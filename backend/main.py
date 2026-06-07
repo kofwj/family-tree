@@ -7,13 +7,14 @@ import json
 import sqlite3
 import re
 from datetime import datetime, timedelta, timezone
+import time
 from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Literal
 from urllib.parse import quote
 
 import pandas as pd
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.responses import FileResponse, Response
@@ -31,9 +32,27 @@ if RUNNING_IN_CONTAINER and JWT_SECRET in INSECURE_JWT_SECRETS:
 if JWT_SECRET in INSECURE_JWT_SECRETS:
     JWT_SECRET = 'dev-only-family-tree-secret'
 JWT_ALG = 'HS256'
+PASSWORD_MIN_LENGTH = int(os.getenv('PASSWORD_MIN_LENGTH', '10'))
+PHOTO_MAX_BYTES = int(os.getenv('PHOTO_MAX_BYTES', str(5 * 1024 * 1024)))
+LOGIN_RATE_LIMIT_MAX = int(os.getenv('LOGIN_RATE_LIMIT_MAX', '5'))
+LOGIN_RATE_LIMIT_WINDOW_SECONDS = int(os.getenv('LOGIN_RATE_LIMIT_WINDOW_SECONDS', '900'))
+LOGIN_RATE_LIMIT_LOCK_SECONDS = int(os.getenv('LOGIN_RATE_LIMIT_LOCK_SECONDS', '900'))
+LOGIN_ATTEMPTS: Dict[str, Dict[str, Any]] = {}
+
+
+def is_strong_password_value(password: str) -> bool:
+    if not password or len(password) < PASSWORD_MIN_LENGTH:
+        return False
+    if any(ch.isspace() for ch in password):
+        return False
+    has_letter = any(ch.isalpha() for ch in password)
+    has_digit = any(ch.isdigit() for ch in password)
+    return has_letter and has_digit
+
+
 ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD', '')
-if RUNNING_IN_CONTAINER and (not ADMIN_PASSWORD or ADMIN_PASSWORD == 'admin123'):
-    raise RuntimeError('ADMIN_PASSWORD must be set to a strong non-default value in production')
+if RUNNING_IN_CONTAINER and (not ADMIN_PASSWORD or ADMIN_PASSWORD == 'admin123' or not is_strong_password_value(ADMIN_PASSWORD)):
+    raise RuntimeError(f'ADMIN_PASSWORD must be set to a strong non-default value with at least {PASSWORD_MIN_LENGTH} chars including letters and digits')
 if not ADMIN_PASSWORD:
     ADMIN_PASSWORD = 'admin123'
 DATA_DIR = Path('/app/data') if RUNNING_IN_CONTAINER else Path('./data')
@@ -696,8 +715,45 @@ def validate_role(role: Optional[str]) -> Optional[str]:
     return role
 
 def validate_new_password(password: str):
-    if not password or len(password) < 6:
-        raise HTTPException(status_code=400, detail='密码至少需要 6 位')
+    if not is_strong_password_value(password):
+        raise HTTPException(status_code=400, detail=f'密码至少需要 {PASSWORD_MIN_LENGTH} 位，且必须包含字母和数字，不能包含空白字符')
+
+
+def login_rate_limit_key(request: Request, username: str) -> str:
+    forwarded_for = request.headers.get('x-forwarded-for', '')
+    ip = forwarded_for.split(',', 1)[0].strip() or (request.client.host if request.client else 'unknown')
+    return f'{ip}:{(username or "").strip().lower()}'
+
+
+def check_login_rate_limit(request: Request, username: str):
+    now = time.monotonic()
+    key = login_rate_limit_key(request, username)
+    row = LOGIN_ATTEMPTS.get(key)
+    if not row:
+        return
+    if now - row.get('first_attempt_at', now) > LOGIN_RATE_LIMIT_WINDOW_SECONDS:
+        LOGIN_ATTEMPTS.pop(key, None)
+        return
+    locked_until = row.get('locked_until', 0)
+    if locked_until and now < locked_until:
+        retry_after = max(1, int(locked_until - now))
+        raise HTTPException(status_code=429, detail=f'登录失败次数过多，请 {retry_after} 秒后再试', headers={'Retry-After': str(retry_after)})
+
+
+def record_login_failure(request: Request, username: str):
+    now = time.monotonic()
+    key = login_rate_limit_key(request, username)
+    row = LOGIN_ATTEMPTS.get(key)
+    if not row or now - row.get('first_attempt_at', now) > LOGIN_RATE_LIMIT_WINDOW_SECONDS:
+        row = {'count': 0, 'first_attempt_at': now, 'locked_until': 0}
+    row['count'] = int(row.get('count', 0)) + 1
+    if row['count'] >= LOGIN_RATE_LIMIT_MAX:
+        row['locked_until'] = now + LOGIN_RATE_LIMIT_LOCK_SECONDS
+    LOGIN_ATTEMPTS[key] = row
+
+
+def clear_login_failures(request: Request, username: str):
+    LOGIN_ATTEMPTS.pop(login_rate_limit_key(request, username), None)
 
 def resolve_user_member_id(session: Session, member_id: Optional[int]) -> Optional[int]:
     if member_id in (None, ''):
@@ -706,6 +762,60 @@ def resolve_user_member_id(session: Session, member_id: Optional[int]) -> Option
     if not member:
         raise HTTPException(status_code=400, detail='绑定成员不存在')
     return member.id
+
+PHOTO_ALLOWED_TYPES = {
+    '.jpg': {'image/jpeg'},
+    '.jpeg': {'image/jpeg'},
+    '.png': {'image/png'},
+    '.webp': {'image/webp'},
+}
+
+
+def detect_image_mime(header: bytes) -> Optional[str]:
+    if header.startswith(b'\xff\xd8\xff'):
+        return 'image/jpeg'
+    if header.startswith(b'\x89PNG\r\n\x1a\n'):
+        return 'image/png'
+    if len(header) >= 12 and header[:4] == b'RIFF' and header[8:12] == b'WEBP':
+        return 'image/webp'
+    return None
+
+
+def validate_photo_upload(file: UploadFile, suffix: str):
+    allowed_mimes = PHOTO_ALLOWED_TYPES.get(suffix)
+    if not allowed_mimes:
+        raise HTTPException(status_code=400, detail='仅支持 JPG/PNG/WebP 照片')
+    declared_mime = (file.content_type or '').split(';', 1)[0].strip().lower()
+    if declared_mime and declared_mime not in allowed_mimes:
+        raise HTTPException(status_code=400, detail='照片 MIME 类型与文件后缀不匹配')
+    header = file.file.read(512)
+    file.file.seek(0)
+    detected_mime = detect_image_mime(header)
+    if detected_mime not in allowed_mimes:
+        raise HTTPException(status_code=400, detail='照片文件内容不是有效的 JPG/PNG/WebP 图片')
+
+
+def save_limited_upload(file: UploadFile, target: Path, max_bytes: int):
+    total = 0
+    try:
+        with target.open('wb') as f:
+            while True:
+                chunk = file.file.read(1024 * 1024)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > max_bytes:
+                    raise HTTPException(status_code=413, detail=f'照片不能超过 {max_bytes // (1024 * 1024)}MB')
+                f.write(chunk)
+    except Exception:
+        try:
+            target.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+    if total <= 0:
+        target.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail='照片文件为空')
 
 def sanitize_audit_detail(detail: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     if not detail:
@@ -2241,11 +2351,14 @@ def health():
     return {'ok': True, 'time': datetime.now(timezone.utc).isoformat()}
 
 @app.post('/auth/login', response_model=Token)
-def login(form: OAuth2PasswordRequestForm = Depends()):
+def login(request: Request, form: OAuth2PasswordRequestForm = Depends()):
+    check_login_rate_limit(request, form.username)
     with Session(engine) as session:
         user = session.exec(select(User).where(User.username == form.username)).first()
         if not user or not user.is_active or not verify_password(form.password, user.password_hash):
+            record_login_failure(request, form.username)
             raise HTTPException(status_code=401, detail='用户名或密码错误')
+        clear_login_failures(request, form.username)
         user.last_login_at = datetime.now(timezone.utc).isoformat()
         write_audit_log(session, user, 'auth.login', target_type='user', target_id=user.id, target_label=user.username)
         session.add(user)
@@ -2471,16 +2584,14 @@ def create_member(payload: MemberCreate, user: User = Depends(require_capability
 @app.post('/members/{member_id}/photo')
 def upload_member_photo(member_id: int, file: UploadFile = File(...), user: User = Depends(require_capability('member.edit_profile'))):
     suffix = Path(file.filename or '').suffix.lower()
-    if suffix not in {'.jpg', '.jpeg', '.png', '.webp'}:
-        raise HTTPException(status_code=400, detail='仅支持 JPG/PNG/WebP 照片')
+    validate_photo_upload(file, suffix)
     backup_db(f'before-photo-{member_id}')
     with Session(engine) as session:
         m = session.get(Member, member_id)
         require_member_in_full_scope(session, user, m)
         filename = f'member-{member_id}-{local_timestamp_for_filename()}{suffix}'
         target = PHOTO_DIR / filename
-        with target.open('wb') as f:
-            shutil.copyfileobj(file.file, f)
+        save_limited_upload(file, target, PHOTO_MAX_BYTES)
         m.photo_path = f'/api/member-photos/{filename}'
         m.updated_at = datetime.now(timezone.utc).isoformat()
         session.add(m)

@@ -998,11 +998,21 @@ async function backup() {
   ElMessage.success('备份成功')
 }
 
-function downloadBackup(row) {
+async function downloadBackup(row) {
   if (!can('backup.download')) return
   if (!row?.file) {
     ElMessage.error('下载失败')
     return
+  }
+  try {
+    await ElMessageBox.confirm(
+      `确定下载备份「${row.file}」？备份文件包含完整家谱隐私数据，请妥善保存。`,
+      '确认下载备份',
+      { confirmButtonText: '下载', cancelButtonText: '取消', type: 'warning' }
+    )
+  } catch (e) {
+    if (e === 'cancel' || e === 'close') return
+    throw e
   }
   api.get(`/admin/backups/${encodeURIComponent(row.file)}/download`, { responseType: 'blob' })
     .then(({ data }) => {
