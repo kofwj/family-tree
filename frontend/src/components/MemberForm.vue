@@ -285,7 +285,7 @@
 
 <script setup>
 import { ref, computed, watch, nextTick } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage } from 'element-plus/es/components/message/index'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
