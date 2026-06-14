@@ -2,7 +2,7 @@
 
 家谱管理系统，面向家族内部资料整理、成员关系维护、族谱浏览和档案治理。项目包含前后端、权限体系、备份恢复、Excel 导入、GEDCOM 导出、来源引用和数据质量检查等功能。
 
-> ⚠️ 家谱数据通常包含姓名、亲属关系、生日、住址、照片等隐私信息。请不要把真实数据库、导入表、照片和 `.env` 提交到公开仓库。
+> ⚠️ 家谱数据通常包含姓名、亲属关系、生日、住址、照片等隐私信息。请不要把真实运行数据或本地环境配置提交到公开仓库。
 
 ## 功能特性
 
@@ -32,8 +32,8 @@
 ├── frontend/             # Vue 前端
 ├── scripts/              # 备份、部署、关系回填脚本
 ├── docs/                 # 设计文档和阶段记录
-├── data/                 # 本地运行数据，禁止提交
-├── import/               # 本地导入文件，禁止提交
+├── data/                 # 本地运行数据目录
+├── import/               # 本地导入文件目录
 ├── docker-compose.yml
 ├── .env.example
 └── README.md
@@ -140,26 +140,14 @@ curl -fsS http://localhost:3000/health
 - 备份创建使用 SQLite online backup；恢复前会执行 SQLite 完整性和必要表结构校验，恢复过程采用 staging + 原子替换，并在失败时尝试回滚到恢复前安全备份。
 - 前端 Nginx 配置包含 `client_max_body_size`、CSP、`X-Content-Type-Options`、`X-Frame-Options`、`Referrer-Policy` 和 `Permissions-Policy` 等基础安全头。
 
-以下文件/目录可能包含真实隐私数据，已通过 `.gitignore` 排除：
-
-```text
-.env
-data/*.db
-data/backups/
-data/member-photos/
-import/*.xlsx
-backups/
-*.ged
-```
-
-上传 GitHub 前建议检查：
+运行时数据、本地导入文件、备份产物和环境配置不属于源码交付内容，应由 `.gitignore` 排除。上传 GitHub 前建议检查：
 
 ```bash
 git status --short
 git diff --cached --name-only
 ```
 
-确认不要出现 `.env`、`data/`、`import/`、`backups/`、`*.db`、成员照片等文件。
+确认只提交源码、配置模板、测试和文档，不提交真实运行数据或本地环境配置。
 
 ## 生产部署建议
 
@@ -169,8 +157,8 @@ git diff --cached --name-only
 - 使用强管理员密码
 - 使用 HTTPS 域名访问
 - 设置 `CORS_ORIGIN=https://你的域名`
-- 定期下载或异地保存 `data/backups/` 中的备份
-- 不要将真实 `data/` 目录同步到公开仓库
+- 定期下载或异地保存系统生成的备份
+- 不要将真实运行数据目录同步到公开仓库
 
 示例：
 
@@ -182,11 +170,7 @@ docker compose up -d --build
 
 ## 备份与恢复
 
-系统会在关键操作前创建安全备份，也支持手动备份。备份文件默认位于：
-
-```text
-data/backups/
-```
+系统会在关键操作前创建安全备份，也支持手动备份。备份文件保存在运行时数据目录下。
 
 备份和恢复保护策略：
 
@@ -196,7 +180,7 @@ data/backups/
 - 恢复前会校验备份文件是否为有效 SQLite 数据库、`PRAGMA integrity_check` 是否为 `ok`、是否包含必要表结构。
 - 恢复过程先写入 staging 文件，再原子替换当前数据库；失败时会尝试回滚到恢复前保护备份。
 
-该目录包含真实家谱数据，禁止提交到 GitHub。
+备份包含真实家谱数据，禁止提交到 GitHub。
 
 ## 文档
 
