@@ -261,6 +261,114 @@
         />
       </el-tab-pane>
 
+      <el-tab-pane v-if="canManageFamilies" name="families">
+        <template #label>家族管理</template>
+        <el-card class="settings-card" shadow="never">
+          <template #header>
+            <div class="section-card-header">
+              <strong>家族列表</strong>
+              <el-button v-if="canEditFamilies" type="primary" size="small" @click="openFamilyDialog()">新增家族</el-button>
+            </div>
+          </template>
+          
+          <el-table :data="families" stripe border>
+            <el-table-column prop="name" label="家族名称" min-width="140" />
+            <el-table-column prop="surname" label="姓氏" width="100" align="center" />
+            <el-table-column prop="siteTitle" label="站点标题" min-width="180" />
+            <el-table-column label="主家族" width="100" align="center">
+              <template #default="{ row }">
+                <el-tag v-if="row.isPrimary" type="success" size="small">主</el-tag>
+                <span v-else>—</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="成员数" width="100" align="center">
+              <template #default="{ row }">
+                {{ row.memberCount || 0 }}
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="180" align="center" fixed="right">
+              <template #default="{ row }">
+                <el-button v-if="canEditFamilies" link type="primary" size="small" @click="openFamilyDialog(row)">编辑</el-button>
+                <el-button v-if="canEditFamilies" link type="info" size="small" @click="manageFamilyUsers(row)">权限</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </el-card>
+
+        <!-- Family Edit Dialog -->
+        <el-dialog v-model="familyDialogVisible" :title="editingFamily ? '编辑家族' : '新增家族'" width="600px">
+          <el-form :model="familyForm" label-width="100px">
+            <el-form-item label="家族名称">
+              <el-input v-model="familyForm.name" placeholder="例如：陈氏宗族" />
+            </el-form-item>
+            <el-form-item label="姓氏">
+              <el-input v-model="familyForm.surname" placeholder="例如：陈" maxlength="2" />
+            </el-form-item>
+            <el-form-item label="站点标题">
+              <el-input v-model="familyForm.siteTitle" placeholder="例如：陈氏宗族家谱" />
+            </el-form-item>
+            <el-form-item label="副标题">
+              <el-input v-model="familyForm.subtitle" placeholder="例如：承先祖之德 · 启后世之贤" />
+            </el-form-item>
+            <el-form-item label="英文标识">
+              <el-input v-model="familyForm.coverKicker" placeholder="例如：CHEN CLAN · GENEALOGY" />
+            </el-form-item>
+            <el-form-item label="描述">
+              <el-input v-model="familyForm.description" type="textarea" :rows="3" />
+            </el-form-item>
+          </el-form>
+          <template #footer>
+            <el-button @click="familyDialogVisible = false">取消</el-button>
+            <el-button type="primary" :loading="savingFamily" @click="saveFamily">保存</el-button>
+          </template>
+        </el-dialog>
+
+        <!-- Family Users Dialog -->
+        <el-dialog v-model="familyUsersDialogVisible" :title="`${currentFamilyForUsers?.name || ''} - 用户权限管理`" width="700px">
+          <div style="margin-bottom: 16px">
+            <el-button type="primary" size="small" @click="openAddFamilyUserDialog">添加用户</el-button>
+          </div>
+          <el-table :data="familyUsers" stripe border>
+            <el-table-column prop="username" label="用户名" width="140" />
+            <el-table-column prop="displayName" label="显示名称" min-width="120" />
+            <el-table-column label="角色" width="120" align="center">
+              <template #default="{ row }">
+                <el-tag :type="row.role === 'admin' ? 'danger' : row.role === 'editor' ? 'warning' : 'info'" size="small">
+                  {{ row.role === 'admin' ? '管理员' : row.role === 'editor' ? '编辑者' : '查看者' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="100" align="center">
+              <template #default="{ row }">
+                <el-button link type="danger" size="small" @click="removeFamilyUser(row)">移除</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </el-dialog>
+
+        <!-- Add Family User Dialog -->
+        <el-dialog v-model="addFamilyUserDialogVisible" title="添加用户到家族" width="500px">
+          <el-form label-width="80px">
+            <el-form-item label="选择用户">
+              <el-select v-model="newFamilyUser.userId" placeholder="请选择用户" style="width: 100%">
+                <el-option v-for="u in availableUsers" :key="u.id" :label="`${u.displayName} (${u.username})`" :value="u.id" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="角色">
+              <el-select v-model="newFamilyUser.role" placeholder="请选择角色" style="width: 100%">
+                <el-option label="查看者" value="viewer" />
+                <el-option label="编辑者" value="editor" />
+                <el-option label="管理员" value="admin" />
+              </el-select>
+            </el-form-item>
+          </el-form>
+          <template #footer>
+            <el-button @click="addFamilyUserDialogVisible = false">取消</el-button>
+            <el-button type="primary" :loading="savingFamilyUser" @click="addFamilyUser">添加</el-button>
+          </template>
+        </el-dialog>
+      </el-tab-pane>
+
       <el-tab-pane v-if="canShowSettings" name="settings">
         <template #label>基础与显示</template>
         <div class="settings-config-grid">
@@ -390,6 +498,7 @@ const props = defineProps({
   qualityReport: { type: Object, default: () => ({ summary: { total: 0, bySeverity: {}, byCategory: {} }, issues: [] }) },
   reviewRequests: { type: Array, default: () => [] },
   sources: { type: Array, default: () => [] },
+  families: { type: Array, default: () => [] },
   currentUser: { type: Object, default: null },
   userLoading: { type: Boolean, default: false },
   canViewUsers: { type: Boolean, default: false },
@@ -405,12 +514,15 @@ const props = defineProps({
   canManageSources: { type: Boolean, default: false },
   canExportGedcom: { type: Boolean, default: false },
   canViewAudit: { type: Boolean, default: false },
+  canManageFamilies: { type: Boolean, default: false },
+  canEditFamilies: { type: Boolean, default: false },
 })
 
 const emit = defineEmits([
   'save-settings', 'create-user', 'update-user', 'toggle-user-active', 'reset-user-password',
   'refresh-quality', 'approve-review', 'reject-review',
   'create-source', 'update-source', 'delete-source', 'export-gedcom',
+  'save-family', 'load-family-users', 'add-family-user', 'remove-family-user',
 ])
 
 const draft = reactive({
@@ -431,8 +543,32 @@ const sourceDialogVisible = ref(false)
 const editingSource = ref(null)
 const userDraft = reactive({ username: '', password: '', displayName: '', role: 'viewer', memberId: null, email: '', phone: '', isActive: true })
 const sourceDraft = reactive({ title: '', source_type: '', author: '', repository: '', reference: '', url: '', note: '' })
-const activeGovernanceTab = ref('overview')
 
+// Family management
+const familyDialogVisible = ref(false)
+const familyUsersDialogVisible = ref(false)
+const addFamilyUserDialogVisible = ref(false)
+const editingFamily = ref(null)
+const currentFamilyForUsers = ref(null)
+const familyUsers = ref([])
+const savingFamily = ref(false)
+const savingFamilyUser = ref(false)
+const familyForm = reactive({
+  name: '',
+  surname: '',
+  siteTitle: '',
+  subtitle: '',
+  coverKicker: '',
+  description: '',
+})
+const newFamilyUser = reactive({
+  userId: null,
+  role: 'viewer',
+})
+
+const availableUsers = computed(() => props.users.filter(u => u.isActive))
+
+const activeGovernanceTab = ref('overview')
 const memberOptions = computed(() => [...(props.members || [])].sort((a, b) => {
   const ga = Number(a?.generation || 0)
   const gb = Number(b?.generation || 0)
@@ -691,6 +827,70 @@ function saveSource() {
   } else {
     emit('create-source', { payload, done: () => { sourceDialogVisible.value = false } })
   }
+}
+
+// Family management methods
+function openFamilyDialog(family = null) {
+  editingFamily.value = family
+  if (family) {
+    Object.assign(familyForm, {
+      name: family.name || '',
+      surname: family.surname || '',
+      siteTitle: family.siteTitle || '',
+      subtitle: family.subtitle || '',
+      coverKicker: family.coverKicker || '',
+      description: family.description || '',
+    })
+  } else {
+    Object.assign(familyForm, {
+      name: '',
+      surname: '',
+      siteTitle: '',
+      subtitle: '',
+      coverKicker: '',
+      description: '',
+    })
+  }
+  familyDialogVisible.value = true
+}
+
+function saveFamily() {
+  emit('save-family', { family: editingFamily.value, form: { ...familyForm }, done: () => { familyDialogVisible.value = false } })
+}
+
+async function manageFamilyUsers(family) {
+  currentFamilyForUsers.value = family
+  emit('load-family-users', { familyId: family.id, callback: (users) => { familyUsers.value = users } })
+  familyUsersDialogVisible.value = true
+}
+
+function openAddFamilyUserDialog() {
+  Object.assign(newFamilyUser, { userId: null, role: 'viewer' })
+  addFamilyUserDialogVisible.value = true
+}
+
+function addFamilyUser() {
+  if (!newFamilyUser.userId || !currentFamilyForUsers.value) return
+  emit('add-family-user', {
+    familyId: currentFamilyForUsers.value.id,
+    userId: newFamilyUser.userId,
+    role: newFamilyUser.role,
+    done: () => {
+      addFamilyUserDialogVisible.value = false
+      emit('load-family-users', { familyId: currentFamilyForUsers.value.id, callback: (users) => { familyUsers.value = users } })
+    }
+  })
+}
+
+function removeFamilyUser(user) {
+  if (!currentFamilyForUsers.value) return
+  emit('remove-family-user', {
+    familyId: currentFamilyForUsers.value.id,
+    userId: user.userId,
+    done: () => {
+      emit('load-family-users', { familyId: currentFamilyForUsers.value.id, callback: (users) => { familyUsers.value = users } })
+    }
+  })
 }
 
 watch(() => props.settings, resetDraft, { immediate: true, deep: true })

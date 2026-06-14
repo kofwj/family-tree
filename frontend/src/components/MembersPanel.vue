@@ -149,6 +149,9 @@
           <el-tag v-else-if="col.key === 'isCoreMember' || col.key === 'isPublic'" :type="row[col.key] === false ? 'info' : 'success'" effect="plain">
             {{ row[col.key] === false ? '否' : '是' }}
           </el-tag>
+          <el-tag v-else-if="col.key === 'primaryFamilyId'" type="success" effect="plain">
+            {{ familyNameById[row.primaryFamilyId] || '未分配' }}
+          </el-tag>
           <span v-else-if="['fatherId', 'motherId', 'spouseIds'].includes(col.key)">{{ relationText(row, col.key) }}</span>
           <span v-else>{{ displayValue(row[col.key]) }}</span>
         </template>
@@ -244,6 +247,7 @@ const props = defineProps({
   canEdit: { type: Boolean, default: false },
   canDelete: { type: Boolean, default: false },
   canConfigFields: { type: Boolean, default: false },
+  families: { type: Array, default: () => [] },
 })
 
 const emit = defineEmits(['open-member', 'edit-member', 'delete-member', 'update-visible-fields'])
@@ -255,6 +259,15 @@ const qualityFilter = ref('all')
 const lowCompletenessThreshold = ref(60)
 const fieldDialogVisible = ref(false)
 const draftVisibleFields = ref([])
+
+// Family name lookup
+const familyNameById = computed(() => {
+  const map = {}
+  for (const family of props.families) {
+    map[family.id] = family.name
+  }
+  return map
+})
 
 const supplementFocusFields = [
   { key: 'birthDate', label: '出生日期' },
@@ -386,6 +399,7 @@ const columnMap = {
   rankTitle: { key: 'rankTitle', label: '排行', width: 96, align: 'center' },
   branch: { key: 'branch', label: '支系/房支', minWidth: 120 },
   isCoreMember: { key: 'isCoreMember', label: '本族主线', width: 96, align: 'center' },
+  primaryFamilyId: { key: 'primaryFamilyId', label: '所属家族', width: 110, align: 'center' },
   birthDate: { key: 'birthDate', label: '出生日期', minWidth: 116 },
   deathDate: { key: 'deathDate', label: '去世日期', minWidth: 116 },
   birthPlace: { key: 'birthPlace', label: '出生地', minWidth: 150 },
@@ -419,7 +433,7 @@ const fieldGroups = [
     title: '宗谱信息',
     fields: [
       columnMap.generation, columnMap.generationName, columnMap.rankNo, columnMap.rankTitle,
-      columnMap.branch, columnMap.isCoreMember,
+      columnMap.branch, columnMap.isCoreMember, columnMap.primaryFamilyId,
     ],
   },
   {
