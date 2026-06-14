@@ -2,6 +2,27 @@
 
 ## 2026-06-14
 
+### 多家族管理功能
+
+- 新增多家族架构支持：`FamilyGroup`、`MemberFamilyLink`、`UserFamilyRole` 三张新表，支持一个系统管理多个独立家族（如陈氏、王氏）。
+- 新增 `Member.primary_family_id` 字段，标识成员的主家族归属。
+- 启动时自动创建默认家族（从 AppSettings 读取姓氏），并将现有成员迁移到默认家族。
+- 新增家族管理 API：
+  - `GET /families` - 列出所有家族
+  - `GET /families/{id}` - 查询单个家族详情（含成员数统计）
+  - `PUT /families/{id}` - 更新家族信息（名称、姓氏、站点标题等）
+  - `GET /families/{id}/tree` - 按家族过滤族谱树
+  - `GET /families/{id}/users` - 查询家族用户权限
+  - `POST /families/{id}/users` - 分配用户到家族（支持 admin、editor、viewer 三种角色）
+  - `DELETE /families/{id}/users/{user_id}` - 移除家族用户
+- 新增祖源图 API：`GET /members/{id}/ancestry`，支持四系祖源视图（父系、母系、父系母系、母系母系），可追溯任意代数。
+- 实现细粒度家族权限控制：用户可以被分配为特定家族的管理员、编辑者或查看者，权限与全局角色独立。
+- 工作台顶部新增家族选择器：用户可实时切换家族查看不同的族谱树，选择记录在 localStorage 下次自动恢复。
+- 成员表新增"所属家族"列，显示成员归属的家族名称。
+- 设置页新增"家族管理"选项卡：支持查看家族列表、编辑家族信息、管理家族用户权限。
+- 新增回归测试：`test_family_groups_regressions.py`，覆盖默认家族创建、成员迁移、按家族过滤树、祖源图端点等功能。
+- 所有测试通过：16 passed（新增 4 个家族功能测试 + 12 个原有核心功能测试）。
+
 ### 安全加固与回归测试
 
 - 成员照片移除公开静态挂载，改为登录后通过 `/member-photos/{filename}` 鉴权访问，并按成员可见范围校验。
