@@ -6,6 +6,8 @@ import shutil
 import json
 import sqlite3
 import re
+import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 import time
 from zoneinfo import ZoneInfo
@@ -18,7 +20,6 @@ from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.responses import FileResponse, Response
-from fastapi.staticfiles import StaticFiles
 from jose import jwt, JWTError
 from pydantic import BaseModel
 from sqlmodel import SQLModel, Field, Session, create_engine, select
@@ -34,6 +35,7 @@ if JWT_SECRET in INSECURE_JWT_SECRETS:
 JWT_ALG = 'HS256'
 PASSWORD_MIN_LENGTH = int(os.getenv('PASSWORD_MIN_LENGTH', '10'))
 PHOTO_MAX_BYTES = int(os.getenv('PHOTO_MAX_BYTES', str(5 * 1024 * 1024)))
+EXCEL_MAX_BYTES = int(os.getenv('EXCEL_MAX_BYTES', str(10 * 1024 * 1024)))
 LOGIN_RATE_LIMIT_MAX = int(os.getenv('LOGIN_RATE_LIMIT_MAX', '5'))
 LOGIN_RATE_LIMIT_WINDOW_SECONDS = int(os.getenv('LOGIN_RATE_LIMIT_WINDOW_SECONDS', '900'))
 LOGIN_RATE_LIMIT_LOCK_SECONDS = int(os.getenv('LOGIN_RATE_LIMIT_LOCK_SECONDS', '900'))
@@ -379,8 +381,13 @@ class AppSettings(BaseModel):
     ]
     fieldVisibilityTemplates: FieldVisibilityTemplateConfig = FieldVisibilityTemplateConfig()
 
-app = FastAPI(title='Family Tree System', version='1.0.0')
-app.mount('/member-photos', StaticFiles(directory=str(PHOTO_DIR)), name='member_photos')
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    init_db()
+    yield
+
+
+app = FastAPI(title='Family Tree System', version='1.0.0', lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[os.getenv('CORS_ORIGIN', 'http://localhost:8088'), 'http://localhost:5173', 'http://localhost:8088'],
@@ -628,10 +635,6 @@ def init_db():
     with Session(engine) as session:
         ensure_default_admin(session)
 
-@app.on_event('startup')
-def on_startup():
-    init_db()
-
 def hash_password(password: str) -> str:
     salt = os.urandom(16)
     digest = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt, 200000)
@@ -795,7 +798,7 @@ def validate_photo_upload(file: UploadFile, suffix: str):
         raise HTTPException(status_code=400, detail='照片文件内容不是有效的 JPG/PNG/WebP 图片')
 
 
-def save_limited_upload(file: UploadFile, target: Path, max_bytes: int):
+def save_limited_upload(file: UploadFile, target: Path, max_bytes: int, label: str = '文件'):
     total = 0
     try:
         with target.open('wb') as f:
@@ -805,7 +808,7 @@ def save_limited_upload(file: UploadFile, target: Path, max_bytes: int):
                     break
                 total += len(chunk)
                 if total > max_bytes:
-                    raise HTTPException(status_code=413, detail=f'照片不能超过 {max_bytes // (1024 * 1024)}MB')
+                    raise HTTPException(status_code=413, detail=f'{label}不能超过 {max_bytes // (1024 * 1024)}MB')
                 f.write(chunk)
     except Exception:
         try:
@@ -815,7 +818,7 @@ def save_limited_upload(file: UploadFile, target: Path, max_bytes: int):
         raise
     if total <= 0:
         target.unlink(missing_ok=True)
-        raise HTTPException(status_code=400, detail='照片文件为空')
+        raise HTTPException(status_code=400, detail=f'{label}为空')
 
 def sanitize_audit_detail(detail: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     if not detail:
@@ -862,6 +865,7 @@ def write_audit_log(
     target_label: Optional[str] = None,
     detail: Optional[Dict[str, Any]] = None,
 ):
+    sanitized_detail = sanitize_audit_detail(detail)
     row = AuditLog(
         actor_user_id=actor.id if actor else None,
         actor_username=actor.username if actor else None,
@@ -870,7 +874,7 @@ def write_audit_log(
         target_type=target_type,
         target_id=str(target_id) if target_id is not None else None,
         target_label=target_label,
-        detail_json=json.dumps(sanitize_audit_detail(detail), ensure_ascii=False) if sanitize_audit_detail(detail) else None,
+        detail_json=json.dumps(sanitized_detail, ensure_ascii=False) if sanitized_detail else None,
         created_at=datetime.now(timezone.utc).isoformat(),
     )
     session.add(row)
@@ -1246,6 +1250,41 @@ def sync_member_spouse_links(session: Session, member_id: Optional[int], old_spo
         session.add(spouse)
 
 
+def member_has_ancestor(session: Session, member_id: int, ancestor_id: int, *, max_depth: int = 1000) -> bool:
+    """Return whether ancestor_id is already in member_id's parent chain."""
+    to_visit = [member_id]
+    seen: set[int] = set()
+    depth = 0
+    while to_visit:
+        depth += 1
+        if depth > max_depth:
+            raise HTTPException(status_code=400, detail='亲子关系层级过深或存在循环，请先修正关系')
+        current_id = to_visit.pop()
+        if current_id in seen:
+            continue
+        seen.add(current_id)
+        member = session.get(Member, current_id)
+        if not member:
+            continue
+        for parent_id in (member.father_id, member.mother_id):
+            if not parent_id:
+                continue
+            if parent_id == ancestor_id:
+                return True
+            if parent_id not in seen:
+                to_visit.append(parent_id)
+    return False
+
+
+def validate_parent_assignment(session: Session, current_member_id: Optional[int], parent: Optional[Member], relation_label: str):
+    if not parent or not current_member_id or not parent.id:
+        return
+    if parent.id == current_member_id:
+        raise HTTPException(status_code=400, detail=f'{relation_label}不能指向自己')
+    if member_has_ancestor(session, parent.id, current_member_id):
+        raise HTTPException(status_code=400, detail=f'{relation_label}不能指向自己的后代，避免形成亲子关系循环')
+
+
 def resolve_relation_payload(session: Session, payload: Dict[str, Any], current_member_id: Optional[int] = None) -> Dict[str, Any]:
     data = dict(payload)
     members = session.exec(select(Member)).all()
@@ -1280,15 +1319,13 @@ def resolve_relation_payload(session: Session, payload: Dict[str, Any], current_
 
     if has_father_payload:
         father = pick_member(data.get('father_id'), data.get('father_name'))
-        if father and current_member_id and father.id == current_member_id:
-            raise HTTPException(status_code=400, detail='父亲不能指向自己')
+        validate_parent_assignment(session, current_member_id, father, '父亲')
         data['father_id'] = father.id if father else None
         data['father_name'] = father.name if father else (normalize_name_value(data.get('father_name')) or None)
 
     if has_mother_payload:
         mother = pick_member(data.get('mother_id'), data.get('mother_name'))
-        if mother and current_member_id and mother.id == current_member_id:
-            raise HTTPException(status_code=400, detail='母亲不能指向自己')
+        validate_parent_assignment(session, current_member_id, mother, '母亲')
         data['mother_id'] = mother.id if mother else None
         data['mother_name'] = mother.name if mother else (normalize_name_value(data.get('mother_name')) or None)
 
@@ -1568,18 +1605,87 @@ def prune_auto_backups() -> List[str]:
     return pruned
 
 
+def copy_sqlite_database(source: Path, destination: Path):
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if not source.exists():
+        destination.touch()
+        return
+    src = sqlite3.connect(f'file:{source}?mode=ro', uri=True)
+    try:
+        dst = sqlite3.connect(destination)
+        try:
+            src.backup(dst)
+        finally:
+            dst.close()
+    finally:
+        src.close()
+
+
 def backup_db(reason='manual') -> Dict[str, Any]:
     db = sqlite_path()
     ts = local_timestamp_for_filename()
     safe_reason = re.sub(r'[^A-Za-z0-9_.-]+', '-', str(reason or 'manual')).strip('-') or 'manual'
     backup = BACKUP_DIR / f'family-{ts}-{safe_reason}.db'
-    if db.exists():
-        shutil.copy2(db, backup)
-    else:
-        backup.touch()
+    copy_sqlite_database(db, backup)
     pruned = prune_auto_backups()
     meta = classify_backup_file(backup)
     return {'path': str(backup), 'file': backup.name, 'createdAt': backup_created_at(backup), 'createdAtCompact': ts, 'timezone': str(LOCAL_TIMEZONE), 'pruned': pruned, **meta}
+
+
+def validate_sqlite_backup_file(path: Path):
+    try:
+        conn = sqlite3.connect(f'file:{path}?mode=ro', uri=True)
+    except sqlite3.Error as exc:
+        raise HTTPException(status_code=400, detail=f'备份文件无效或已损坏: {exc}') from exc
+    try:
+        integrity = conn.execute('PRAGMA integrity_check').fetchone()
+        if not integrity or integrity[0] != 'ok':
+            raise HTTPException(status_code=400, detail='备份文件无效或已损坏，完整性校验失败')
+        existing_tables = {
+            row[0]
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+        }
+        required_tables = {table.name for table in SQLModel.metadata.sorted_tables}
+        missing_tables = sorted(required_tables - existing_tables)
+        if missing_tables:
+            raise HTTPException(status_code=400, detail=f'备份表结构缺少必要表: {", ".join(missing_tables[:5])}')
+    except sqlite3.Error as exc:
+        raise HTTPException(status_code=400, detail=f'备份文件无效或已损坏: {exc}') from exc
+    finally:
+        conn.close()
+
+def clear_member_dependent_records_for_replace_import(session: Session):
+    for row in session.exec(select(Citation)).all():
+        session.delete(row)
+    for row in session.exec(select(ReviewRequest)).all():
+        session.delete(row)
+    for user in session.exec(select(User)).all():
+        if user.member_id is not None:
+            user.member_id = None
+            user.updated_at = datetime.now(timezone.utc).isoformat()
+            session.add(user)
+    for m in session.exec(select(Member)).all():
+        session.delete(m)
+
+
+def ensure_member_can_be_deleted(session: Session, member_id: int):
+    child = session.exec(select(Member).where((Member.father_id == member_id) | (Member.mother_id == member_id))).first()
+    if child:
+        raise HTTPException(status_code=409, detail=f'该成员仍被子女「{child.name}」引用，请先调整亲子关系')
+    spouse = session.exec(select(Member)).all()
+    for candidate in spouse:
+        if member_id in parse_spouse_ids_value(candidate.spouse_ids):
+            raise HTTPException(status_code=409, detail=f'该成员仍被配偶「{candidate.name}」引用，请先调整配偶关系')
+    citation = session.exec(select(Citation).where(Citation.member_id == member_id)).first()
+    if citation:
+        raise HTTPException(status_code=409, detail='该成员仍有关联资料引用，请先删除或迁移引用')
+    review = session.exec(select(ReviewRequest).where(ReviewRequest.member_id == member_id)).first()
+    if review:
+        raise HTTPException(status_code=409, detail='该成员仍有关联审核请求，请先处理审核请求')
+    bound_user = session.exec(select(User).where(User.member_id == member_id)).first()
+    if bound_user:
+        raise HTTPException(status_code=409, detail=f'该成员仍绑定用户「{bound_user.username}」，请先解除绑定')
+
 
 def import_excel(path: str, replace=True) -> int:
     df = pd.read_excel(path, sheet_name=0)
@@ -1588,54 +1694,58 @@ def import_excel(path: str, replace=True) -> int:
     if missing:
         raise ValueError(f'缺少字段: {missing}')
     with Session(engine) as session:
-        if replace:
-            for m in session.exec(select(Member)).all():
-                session.delete(m)
+        try:
+            if replace:
+                clear_member_dependent_records_for_replace_import(session)
+            count = 0
+            for _, r in df.iterrows():
+                name = clean(r['姓名'])
+                if not name:
+                    continue
+                m = Member(
+                    name=name, gender=clean(r['性别']), generation=clean_int(r['世代']),
+                    generation_name=clean(r['字辈']), rank_no=clean_int(r['排行序号']), rank_title=clean(r['排行称谓']),
+                    birth_date=clean(r['出生日期']), death_date=clean(r['去世日期']), birth_place=clean(r['出生地']),
+                    death_place=clean(r['去世地']), residence=clean(r['现居住地']), spouse_name=clean(r['配偶']),
+                    burial_place=clean(r['安葬地/墓址']) if '安葬地/墓址' in df.columns else None,
+                    burial_lat=to_float(clean(r['安葬纬度'])) if '安葬纬度' in df.columns else None,
+                    burial_lng=to_float(clean(r['安葬经度'])) if '安葬经度' in df.columns else None,
+                    photo_path=clean(r['照片地址']) if '照片地址' in df.columns else None,
+                    father_name=clean(r['父亲']), mother_name=clean(r['母亲'])
+                )
+                session.add(m)
+                count += 1
+            session.flush()
+
+            members = session.exec(select(Member)).all()
+            by_name: Dict[str, List[Member]] = {}
+            for m in members:
+                nm = normalize_name_value(m.name)
+                if nm:
+                    by_name.setdefault(nm, []).append(m)
+
+            for m in members:
+                father = (by_name.get(normalize_name_value(m.father_name)) or [None])[0] if normalize_name_value(m.father_name) else None
+                mother = (by_name.get(normalize_name_value(m.mother_name)) or [None])[0] if normalize_name_value(m.mother_name) else None
+                spouse_members = [x for sp_name in split_relation_names(m.spouse_name) for x in (by_name.get(sp_name) or [])]
+                uniq_spouse_ids = []
+                for sp in spouse_members:
+                    if sp.id and sp.id != m.id and sp.id not in uniq_spouse_ids:
+                        uniq_spouse_ids.append(sp.id)
+                validate_parent_assignment(session, m.id, father, '父亲')
+                validate_parent_assignment(session, m.id, mother, '母亲')
+                m.father_id = father.id if father else None
+                m.mother_id = mother.id if mother else None
+                m.spouse_ids = encode_spouse_ids_value(uniq_spouse_ids)
+                session.add(m)
+            session.flush()
+            for m in members:
+                sync_member_spouse_links(session, m.id, [], parse_spouse_ids_value(m.spouse_ids))
             session.commit()
-        count = 0
-        for _, r in df.iterrows():
-            name = clean(r['姓名'])
-            if not name:
-                continue
-            m = Member(
-                name=name, gender=clean(r['性别']), generation=clean_int(r['世代']),
-                generation_name=clean(r['字辈']), rank_no=clean_int(r['排行序号']), rank_title=clean(r['排行称谓']),
-                birth_date=clean(r['出生日期']), death_date=clean(r['去世日期']), birth_place=clean(r['出生地']),
-                death_place=clean(r['去世地']), residence=clean(r['现居住地']), spouse_name=clean(r['配偶']),
-                burial_place=clean(r['安葬地/墓址']) if '安葬地/墓址' in df.columns else None,
-                burial_lat=to_float(clean(r['安葬纬度'])) if '安葬纬度' in df.columns else None,
-                burial_lng=to_float(clean(r['安葬经度'])) if '安葬经度' in df.columns else None,
-                photo_path=clean(r['照片地址']) if '照片地址' in df.columns else None,
-                father_name=clean(r['父亲']), mother_name=clean(r['母亲'])
-            )
-            session.add(m)
-            count += 1
-        session.commit()
-
-        members = session.exec(select(Member)).all()
-        by_name: Dict[str, List[Member]] = {}
-        for m in members:
-            nm = normalize_name_value(m.name)
-            if nm:
-                by_name.setdefault(nm, []).append(m)
-
-        for m in members:
-            father = (by_name.get(normalize_name_value(m.father_name)) or [None])[0] if normalize_name_value(m.father_name) else None
-            mother = (by_name.get(normalize_name_value(m.mother_name)) or [None])[0] if normalize_name_value(m.mother_name) else None
-            spouse_members = [x for sp_name in split_relation_names(m.spouse_name) for x in (by_name.get(sp_name) or [])]
-            uniq_spouse_ids = []
-            for sp in spouse_members:
-                if sp.id and sp.id != m.id and sp.id not in uniq_spouse_ids:
-                    uniq_spouse_ids.append(sp.id)
-            m.father_id = father.id if father else None
-            m.mother_id = mother.id if mother else None
-            m.spouse_ids = encode_spouse_ids_value(uniq_spouse_ids)
-            session.add(m)
-        session.flush()
-        for m in members:
-            sync_member_spouse_links(session, m.id, [], parse_spouse_ids_value(m.spouse_ids))
-        session.commit()
-        return count
+            return count
+        except Exception:
+            session.rollback()
+            raise
 
 
 def ensure_import_template() -> Path:
@@ -2369,8 +2479,18 @@ def login(request: Request, form: OAuth2PasswordRequestForm = Depends()):
 def me(user: User = Depends(get_current_user)):
     return current_user_payload(user)
 
+PUBLIC_SETTING_KEYS = {'siteTitle', 'familySurname', 'subtitle', 'coverKicker'}
+
+
+@app.get('/public-settings')
+def get_public_settings():
+    with Session(engine) as session:
+        settings = get_settings_dict(session)
+        return {key: settings.get(key, DEFAULT_SETTINGS.get(key)) for key in PUBLIC_SETTING_KEYS}
+
+
 @app.get('/settings')
-def get_settings():
+def get_settings(_: User = Depends(require_capability('settings.view'))):
     with Session(engine) as session:
         return get_settings_dict(session)
 
@@ -2581,6 +2701,22 @@ def create_member(payload: MemberCreate, user: User = Depends(require_capability
         all_members = session.exec(select(Member)).all()
         return member_to_dict(m, all_members=all_members)
 
+@app.get('/member-photos/{filename}')
+def get_member_photo(filename: str, user: User = Depends(require_capability('member.view'))):
+    target = (PHOTO_DIR / filename).resolve()
+    if PHOTO_DIR.resolve() not in target.parents or not target.exists() or not target.is_file():
+        raise HTTPException(404, '照片不存在')
+    expected_path = f'/api/member-photos/{filename}'
+    with Session(engine) as session:
+        member = session.exec(select(Member).where(Member.photo_path == expected_path)).first()
+        if not member:
+            member = session.exec(select(Member).where(Member.photo_path == f'/member-photos/{filename}')).first()
+        if not member or not can_view_member_with_visibility(user, member, build_member_visibility(session, user)):
+            raise HTTPException(status_code=403, detail='当前账号无权访问该成员照片')
+    media_type = detect_image_mime(target.read_bytes()[:512]) or 'application/octet-stream'
+    return FileResponse(path=target, media_type=media_type)
+
+
 @app.post('/members/{member_id}/photo')
 def upload_member_photo(member_id: int, file: UploadFile = File(...), user: User = Depends(require_capability('member.edit_profile'))):
     suffix = Path(file.filename or '').suffix.lower()
@@ -2589,9 +2725,9 @@ def upload_member_photo(member_id: int, file: UploadFile = File(...), user: User
     with Session(engine) as session:
         m = session.get(Member, member_id)
         require_member_in_full_scope(session, user, m)
-        filename = f'member-{member_id}-{local_timestamp_for_filename()}{suffix}'
+        filename = f'member-{member_id}-{local_timestamp_for_filename()}-{uuid.uuid4().hex[:12]}{suffix}'
         target = PHOTO_DIR / filename
-        save_limited_upload(file, target, PHOTO_MAX_BYTES)
+        save_limited_upload(file, target, PHOTO_MAX_BYTES, label='照片')
         m.photo_path = f'/api/member-photos/{filename}'
         m.updated_at = datetime.now(timezone.utc).isoformat()
         session.add(m)
@@ -2653,6 +2789,7 @@ def delete_member(member_id: int, user: User = Depends(require_capability('membe
     with Session(engine) as session:
         m = session.get(Member, member_id)
         require_member_in_full_scope(session, user, m)
+        ensure_member_can_be_deleted(session, member_id)
         sync_member_spouse_links(session, m.id, parse_spouse_ids_value(m.spouse_ids), [])
         write_audit_log(session, user, 'member.delete', target_type='member', target_id=m.id, target_label=m.name, detail={'generation': m.generation, 'fatherName': m.father_name, 'motherName': m.mother_name})
         session.delete(m)
@@ -2688,10 +2825,13 @@ def tree(user: User = Depends(require_capability('tree.view'))):
 @app.post('/import/excel')
 def upload_excel(file: UploadFile = File(...), user: User = Depends(require_capability('member.import'))):
     backup_db('before-import')
-    tmp = DATA_DIR / f'upload-{local_timestamp_for_filename()}.xlsx'
+    filename = file.filename or ''
+    suffix = Path(filename).suffix.lower()
+    if suffix != '.xlsx':
+        raise HTTPException(status_code=400, detail='仅支持 .xlsx Excel 文件导入')
+    tmp = DATA_DIR / f'upload-{local_timestamp_for_filename()}-{uuid.uuid4().hex[:12]}.xlsx'
     try:
-        with tmp.open('wb') as f:
-            shutil.copyfileobj(file.file, f)
+        save_limited_upload(file, tmp, EXCEL_MAX_BYTES, label='Excel文件')
         count = import_excel(str(tmp), replace=True)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -2771,10 +2911,32 @@ def restore(filename: str, user: User = Depends(require_capability('backup.resto
     target = (BACKUP_DIR / filename).resolve()
     if BACKUP_DIR.resolve() not in target.parents or not target.exists():
         raise HTTPException(404, '备份不存在')
+    validate_sqlite_backup_file(target)
     snapshot = backup_db('before-restore')
-    shutil.copy2(target, sqlite_path())
-    engine.dispose()
-    init_db()
+    db_path = sqlite_path()
+    staging = DATA_DIR / f'restore-{local_timestamp_for_filename()}-{uuid.uuid4().hex[:12]}.db'
+    try:
+        shutil.copy2(target, staging)
+        validate_sqlite_backup_file(staging)
+        engine.dispose()
+        os.replace(staging, db_path)
+        init_db()
+    except Exception as exc:
+        engine.dispose()
+        try:
+            safety_path = Path(snapshot.get('path', ''))
+            if safety_path.exists():
+                os.replace(safety_path, db_path)
+                init_db()
+        except Exception:
+            pass
+        try:
+            staging.unlink(missing_ok=True)
+        except OSError:
+            pass
+        if isinstance(exc, HTTPException):
+            raise exc
+        raise HTTPException(status_code=500, detail='恢复备份失败，已尝试回滚到恢复前保护备份') from exc
     with Session(engine) as audit_session:
         write_audit_log(audit_session, user, 'backup.restore', target_type='backup', target_id=filename, target_label=filename, detail={'safetyBackup': snapshot.get('file')})
         audit_session.commit()

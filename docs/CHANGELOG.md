@@ -1,5 +1,22 @@
 # 更新日志
 
+## 2026-06-14
+
+### 安全加固与回归测试
+
+- 成员照片移除公开静态挂载，改为登录后通过 `/member-photos/{filename}` 鉴权访问，并按成员可见范围校验。
+- 前端成员详情和成员表单改为通过带 Authorization 的 API 请求拉取照片 blob，避免受保护图片在 `<img>` 中无法携带令牌。
+- `/settings` 改为需要 `settings.view` 权限；新增 `/public-settings` 白名单接口供公开首页读取标题、姓氏、副标题等非敏感展示字段。
+- 新增亲子关系环检测，阻止父亲/母亲指向自己或自己的后代。
+- Excel 替换导入改为单事务：失败回滚保留原成员和引用；成功替换时清理成员相关引用、审核请求和用户绑定。
+- Excel 上传新增 `.xlsx` 后缀校验、大小上限和 UUID 临时文件名；照片上传文件名也加入 UUID 片段，降低并发覆盖风险。
+- 删除成员前检查子女、配偶、来源引用、审核请求和用户绑定等依赖；存在依赖时返回 `409 Conflict`。
+- 备份恢复前校验 SQLite 完整性和必要表结构；备份创建改用 SQLite online backup；恢复流程改为 staging + 原子替换，并在失败时尝试回滚到恢复前安全备份。
+- 前端 Nginx 增加上传体积限制、CSP、`X-Content-Type-Options`、`X-Frame-Options`、`Referrer-Policy`、`Permissions-Policy` 等安全头。
+- GitHub Actions 后端流程新增依赖安装和 `pytest tests -q` 回归测试，CI 覆盖 P0/P1/P2 回归用例。
+- FastAPI 启动逻辑从弃用的 `@app.on_event('startup')` 迁移到 lifespan，测试输出不再出现该弃用警告。
+- 新增 `tests/` 回归测试体系、公共 fixture/helper 和 `pytest.ini`；当前本地验证为 `12 passed`，前端生产构建通过。
+
 ## 2026-06-07
 
 ### 高性价比治理能力 MVP
