@@ -28,7 +28,7 @@
 
         <div class="workspace-topbar__actions">
           <el-button type="primary" @click="loadAll">刷新</el-button>
-          <el-button @click="downloadImportTemplate">下载导入样表</el-button>
+          <el-button v-if="can('member.import')" @click="downloadImportTemplate">下载导入样表</el-button>
           <el-upload
             v-if="can('member.import')"
             :show-file-list="false"
@@ -38,7 +38,7 @@
           >
             <el-button>上传成员表格</el-button>
           </el-upload>
-          <el-button type="warning" @click="backup">手动备份</el-button>
+          <el-button v-if="can('backup.create')" type="warning" @click="backup">手动备份</el-button>
           <el-button @click="toggleTheme">{{ darkMode ? '切换浅色' : '切换深色' }}</el-button>
           <el-button type="danger" plain @click="logout">退出</el-button>
         </div>

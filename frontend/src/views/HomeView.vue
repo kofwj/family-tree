@@ -51,8 +51,16 @@ function goLogin() {
 
 onMounted(async () => {
   try {
-    const [m, t, s] = await Promise.all([api.get('/members'), api.get('/tree'), api.get('/settings')])
-    settings.value = { ...settings.value, ...(s.data || {}) }
+    const { data } = await api.get('/public-settings')
+    settings.value = { ...settings.value, ...(data || {}) }
+  } catch {
+    // ignore public settings failure and keep defaults
+  }
+
+  if (!localStorage.getItem('token')) return
+
+  try {
+    const [m, t] = await Promise.all([api.get('/members'), api.get('/tree')])
     const members = m.data || []
     const roots = t.data || []
     const generations = new Set(members.map(x => x.generation).filter(Boolean)).size

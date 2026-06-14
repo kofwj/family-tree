@@ -7,8 +7,8 @@
   >
     <div v-if="member" class="archive-detail">
       <section class="archive-hero">
-        <div class="archive-avatar archive-avatar--photo" v-if="member.photoUrl">
-          <img :src="member.photoUrl" :alt="`${member.name || '成员'}照片`" />
+        <div class="archive-avatar archive-avatar--photo" v-if="member.photoUrl && authenticatedPhotoUrl">
+          <img :src="authenticatedPhotoUrl" :alt="`${member.name || '成员'}照片`" />
         </div>
         <div v-else class="archive-avatar" :class="member.gender === '女' ? 'female' : 'male'">
           {{ initial }}
@@ -279,7 +279,8 @@
 </template>
 
 <script setup>
-import { computed, defineComponent, h, reactive } from 'vue'
+import { computed, defineComponent, h, reactive, ref, watch, onUnmounted } from 'vue'
+import { fetchAuthenticatedObjectUrl, revokeObjectUrl } from '../utils/authenticatedAsset'
 
 function privacyLabel(level) {
   return { public: '公开', login: '登录可见', branch: '本分支可见', admin: '仅管理员可见' }[level] || '公开'
@@ -342,6 +343,20 @@ const isBasicVisible = computed(() => props.member?.visibilityScope === 'basic')
 const canDelete = computed(() => props.canDelete)
 const canViewSource = computed(() => props.canViewSource)
 const canManageSources = computed(() => props.canManageSources)
+const authenticatedPhotoUrl = ref('')
+
+watch(() => props.member?.photoUrl, async (url) => {
+  revokeObjectUrl(authenticatedPhotoUrl.value)
+  authenticatedPhotoUrl.value = ''
+  if (!url) return
+  try {
+    authenticatedPhotoUrl.value = await fetchAuthenticatedObjectUrl(url)
+  } catch {
+    authenticatedPhotoUrl.value = ''
+  }
+}, { immediate: true })
+
+onUnmounted(() => revokeObjectUrl(authenticatedPhotoUrl.value))
 
 const visibleModel = computed({
   get: () => props.modelValue,

@@ -284,8 +284,9 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, nextTick } from 'vue'
+import { ref, computed, watch, nextTick, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus/es/components/message/index'
+import { fetchAuthenticatedObjectUrl, revokeObjectUrl } from '../utils/authenticatedAsset'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -302,7 +303,8 @@ const isEdit = computed(() => !!props.member?.id)
 const rankTitleTouched = ref(false)
 const selectedPhotoFile = ref(null)
 const photoPreviewUrl = ref('')
-const effectivePhotoPreview = computed(() => photoPreviewUrl.value || form.value.photoUrl || '')
+const authenticatedPhotoUrl = ref('')
+const effectivePhotoPreview = computed(() => photoPreviewUrl.value || authenticatedPhotoUrl.value || '')
 
 function revokePhotoPreview() {
   if (photoPreviewUrl.value) {
@@ -417,6 +419,22 @@ watch(() => props.modelValue, (val) => {
     selectedPhotoFile.value = null
     revokePhotoPreview()
   }
+})
+
+watch(() => form.value.photoUrl, async (url) => {
+  revokeObjectUrl(authenticatedPhotoUrl.value)
+  authenticatedPhotoUrl.value = ''
+  if (!url) return
+  try {
+    authenticatedPhotoUrl.value = await fetchAuthenticatedObjectUrl(url)
+  } catch {
+    authenticatedPhotoUrl.value = ''
+  }
+})
+
+onUnmounted(() => {
+  revokePhotoPreview()
+  revokeObjectUrl(authenticatedPhotoUrl.value)
 })
 
 
