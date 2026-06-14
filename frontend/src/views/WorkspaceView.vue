@@ -12,6 +12,25 @@
         </div>
 
         <div class="workspace-topbar__meta">
+          <div class="topbar-mini-card" v-if="families.length > 0">
+            <span>当前家族</span>
+            <el-select 
+              v-model="currentFamilyId" 
+              @change="switchFamily" 
+              size="small" 
+              style="width: 140px"
+            >
+              <el-option
+                v-for="family in families"
+                :key="family.id"
+                :label="family.name"
+                :value="family.id"
+              >
+                <span>{{ family.name }}</span>
+                <el-tag v-if="family.isPrimary" type="success" size="small" style="margin-left: 8px">主</el-tag>
+              </el-option>
+            </el-select>
+          </div>
           <div class="topbar-mini-card">
             <span>当前视图</span>
             <strong>{{ currentSectionLabel }}</strong>
@@ -72,6 +91,7 @@
             :can-edit="can('member.edit_profile')"
             :can-delete="can('member.delete')"
             :can-config-fields="can('settings.edit_display')"
+            :families="families"
             @open-member="openMember"
             @edit-member="startEdit"
             @delete-member="confirmDelete"
@@ -103,6 +123,7 @@
             :quality-report="qualityReport"
             :review-requests="reviewRequests"
             :sources="sources"
+            :families="families"
             :current-user="currentUser"
             :user-loading="userLoading"
             :can-view-users="can('user.view')"
@@ -118,6 +139,8 @@
             :can-manage-sources="can('source.manage')"
             :can-export-gedcom="can('export.gedcom')"
             :can-view-audit="can('audit.view')"
+            :can-manage-families="can('family.view')"
+            :can-edit-families="can('family.edit')"
             @save-settings="saveSettings"
             @create-user="createUser"
             @update-user="updateUser"
@@ -130,6 +153,10 @@
             @update-source="updateSource"
             @delete-source="deleteSource"
             @export-gedcom="exportGedcom"
+            @save-family="saveFamily"
+            @load-family-users="loadFamilyUsers"
+            @add-family-user="addFamilyUser"
+            @remove-family-user="removeFamilyUser"
           />
         </el-tab-pane>
       </el-tabs>
@@ -199,6 +226,12 @@ const selected = ref(null)
 const activeTreeMemberId = ref(null)
 const darkMode = ref(localStorage.getItem('theme') === 'dark')
 const savingSettings = ref(false)
+
+// Family management
+const families = ref([])
+const currentFamily = ref(null)
+const currentFamilyId = ref(null)
+
 const settings = ref({
   siteTitle: '陈氏宗族家谱',
   familySurname: '陈',
@@ -674,12 +707,48 @@ async function loadAll() {
       api.get('/settings'),
     ])
     currentUser.value = me || currentUser.value
-    const requests = [api.get('/members'), api.get('/tree')]
+    
+    // Load families if user has permission
+    if (can('family.view')) {
+      try {
+        const { data: fams } = await api.get('/families')
+        families.value = fams || []
+        
+        // Set current family from localStorage or use primary family
+        const savedFamilyId = localStorage.getItem('currentFamilyId')
+        if (savedFamilyId && families.value.find(f => f.id === parseInt(savedFamilyId))) {
+          currentFamilyId.value = parseInt(savedFamilyId)
+        } else {
+          const primaryFamily = families.value.find(f => f.isPrimary)
+          currentFamilyId.value = primaryFamily ? primaryFamily.id : (families.value[0]?.id || null)
+        }
+        
+        if (currentFamilyId.value) {
+          currentFamily.value = families.value.find(f => f.id === currentFamilyId.value)
+        }
+      } catch (e) {
+        console.warn('Failed to load families:', e)
+      }
+    }
+    
+    const requests = [api.get('/members')]
+    
+    // Load tree filtered by current family if available
+    if (currentFamilyId.value) {
+      requests.push(api.get(`/families/${currentFamilyId.value}/tree`))
+    } else {
+      requests.push(api.get('/tree'))
+    }
+    
     if (can('backup.view')) requests.push(api.get('/admin/backups'))
     const results = await Promise.all(requests)
     const [m, t, b] = results
     members.value = m?.data || []
-    tree.value = t?.data || []
+    
+    // Handle tree response format (may be {nodes: [...]} or [...])
+    const treeData = t?.data
+    tree.value = Array.isArray(treeData) ? treeData : (treeData?.nodes || [])
+    
     backups.value = can('backup.view') ? (b?.data || []) : []
     settings.value = { ...settings.value, ...(s || {}) }
     if (can('user.view')) await loadUsers()
@@ -698,6 +767,23 @@ async function loadAll() {
     throw e
   } finally {
     loading.value = false
+  }
+}
+
+async function switchFamily(familyId) {
+  if (!familyId) return
+  currentFamilyId.value = familyId
+  currentFamily.value = families.value.find(f => f.id === familyId)
+  localStorage.setItem('currentFamilyId', familyId)
+  
+  // Reload tree for the selected family
+  try {
+    const { data } = await api.get(`/families/${familyId}/tree`)
+    tree.value = Array.isArray(data) ? data : (data?.nodes || [])
+    rebuildFlow()
+    ElMessage.success(`已切换到 ${currentFamily.value?.name || '选中家族'}`)
+  } catch (e) {
+    ElMessage.error(e.response?.data?.detail || '切换家族失败')
   }
 }
 
@@ -943,6 +1029,58 @@ async function updateMemberVisibleFields(fields) {
     ElMessage.error(e.response?.data?.detail || '保存显示字段失败')
   } finally {
     savingSettings.value = false
+  }
+}
+
+// Family management functions
+async function saveFamily({ family, form, done }) {
+  try {
+    if (family?.id) {
+      // Update existing family
+      await api.put(`/families/${family.id}`, form)
+      ElMessage.success('家族信息已更新')
+    } else {
+      // Create new family (not implemented in backend yet, but structure is ready)
+      ElMessage.warning('创建新家族功能待实现')
+      return
+    }
+    
+    // Reload families
+    const { data: fams } = await api.get('/families')
+    families.value = fams || []
+    
+    if (done) done()
+  } catch (e) {
+    ElMessage.error(e.response?.data?.detail || '保存家族失败')
+  }
+}
+
+async function loadFamilyUsers({ familyId, callback }) {
+  try {
+    const { data } = await api.get(`/families/${familyId}/users`)
+    if (callback) callback(data || [])
+  } catch (e) {
+    ElMessage.error(e.response?.data?.detail || '加载家族用户失败')
+  }
+}
+
+async function addFamilyUser({ familyId, userId, role, done }) {
+  try {
+    await api.post(`/families/${familyId}/users`, { userId, role })
+    ElMessage.success('用户已添加到家族')
+    if (done) done()
+  } catch (e) {
+    ElMessage.error(e.response?.data?.detail || '添加用户失败')
+  }
+}
+
+async function removeFamilyUser({ familyId, userId, done }) {
+  try {
+    await api.delete(`/families/${familyId}/users/${userId}`)
+    ElMessage.success('用户已从家族移除')
+    if (done) done()
+  } catch (e) {
+    ElMessage.error(e.response?.data?.detail || '移除用户失败')
   }
 }
 

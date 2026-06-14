@@ -159,6 +159,7 @@ class Member(SQLModel, table=True):
     source: Optional[str] = None
     is_public: Optional[bool] = True
     privacy_level: Optional[str] = Field(default='public', index=True)
+    primary_family_id: Optional[int] = Field(default=None, index=True)
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     updated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
@@ -210,6 +211,7 @@ class MemberCreate(BaseModel):
     source: Optional[str] = None
     is_public: Optional[bool] = True
     privacy_level: Optional[str] = 'public'
+    primary_family_id: Optional[int] = None
 
 class MemberUpdate(MemberCreate):
     # PUT/PATCH-style update payload: every field is optional and only submitted
@@ -230,6 +232,38 @@ class User(SQLModel, table=True):
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     updated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     last_login_at: Optional[str] = None
+
+class FamilyGroup(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = Field(index=True)
+    surname: Optional[str] = None
+    site_title: Optional[str] = None
+    cover_kicker: Optional[str] = None
+    subtitle: Optional[str] = None
+    description: Optional[str] = None
+    root_member_id: Optional[int] = None
+    primary_line: str = 'paternal'
+    is_primary: bool = Field(default=False, index=True)
+    is_active: bool = Field(default=True, index=True)
+    sort_order: int = 0
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    updated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+class MemberFamilyLink(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    member_id: int = Field(index=True)
+    family_id: int = Field(index=True)
+    relation_type: str = Field(default='primary', index=True)
+    is_primary: bool = Field(default=False, index=True)
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+class UserFamilyRole(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(index=True)
+    family_id: int = Field(index=True)
+    role: str = Field(default='viewer', index=True)
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    updated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 class AuditLog(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -430,6 +464,7 @@ MEMBER_SQLITE_EXTRA_COLUMNS = {
     'source': 'TEXT',
     'is_public': 'INTEGER DEFAULT 1',
     'privacy_level': "TEXT DEFAULT 'public'",
+    'primary_family_id': 'INTEGER',
 }
 
 USER_SQLITE_EXTRA_COLUMNS = {
@@ -491,6 +526,7 @@ ROLE_CAPABILITIES = {
         'tree.view', 'tree.locate', 'tree.edit_structure',
         'backup.view', 'backup.create', 'backup.download', 'backup.delete', 'backup.restore',
         'settings.view', 'settings.edit_basic', 'settings.edit_display', 'settings.edit_security',
+        'family.view', 'family.create', 'family.edit', 'family.delete',
         'user.view', 'user.create', 'user.edit_role', 'user.disable', 'user.reset_password',
         'audit.view', 'quality.view', 'review.view', 'review.approve', 'source.view', 'source.manage', 'export.gedcom',
     },
@@ -499,6 +535,7 @@ ROLE_CAPABILITIES = {
         'tree.view', 'tree.locate', 'tree.edit_structure',
         'backup.view', 'backup.create', 'backup.download',
         'settings.view', 'settings.edit_basic', 'settings.edit_display',
+        'family.view', 'family.edit',
         'audit.view', 'quality.view', 'review.view', 'review.approve', 'source.view', 'source.manage', 'export.gedcom',
     },
     'editor': {
@@ -633,6 +670,8 @@ def init_db():
     migrate_sqlite_user_columns()
     migrate_sqlite_audit_log_columns()
     with Session(engine) as session:
+        ensure_default_family_group(session)
+        ensure_member_primary_family(session)
         ensure_default_admin(session)
 
 def hash_password(password: str) -> str:
@@ -651,6 +690,36 @@ def verify_password(password: str, password_hash: str) -> bool:
         return hmac.compare_digest(actual, expected)
     except Exception:
         return False
+
+def ensure_default_family_group(session: Session):
+    family = session.exec(select(FamilyGroup).where(FamilyGroup.is_primary == True)).first()
+    if not family:
+        # Load from settings file if exists
+        settings = AppSettings()
+        family = FamilyGroup(
+            name=settings.familySurname + '氏宗族',
+            surname=settings.familySurname,
+            site_title=settings.siteTitle,
+            subtitle=settings.subtitle,
+            cover_kicker=settings.coverKicker,
+            is_primary=True,
+            is_active=True
+        )
+        session.add(family)
+        session.commit()
+
+def ensure_member_primary_family(session: Session):
+    primary_family = session.exec(select(FamilyGroup).where(FamilyGroup.is_primary == True)).first()
+    if not primary_family:
+        return
+    
+    # Update members missing primary_family_id
+    members = session.exec(select(Member).where(Member.primary_family_id == None)).all()
+    for member in members:
+        member.primary_family_id = primary_family.id
+        session.add(member)
+    if members:
+        session.commit()
 
 def ensure_default_admin(session: Session):
     admin = session.exec(select(User).where(User.username == 'admin')).first()
@@ -1163,6 +1232,45 @@ def require_capability(capability: str):
         return user
     return dependency
 
+def get_user_family_role(session: Session, user: User, family_id: int) -> Optional[str]:
+    """Get user's role for a specific family. Returns None if no specific role assigned."""
+    if user.role in ('super_admin', 'admin'):
+        return user.role
+    
+    family_role = session.exec(
+        select(UserFamilyRole)
+        .where(UserFamilyRole.user_id == user.id)
+        .where(UserFamilyRole.family_id == family_id)
+    ).first()
+    
+    return family_role.role if family_role else None
+
+def can_edit_family(session: Session, user: User, family_id: int) -> bool:
+    """Check if user can edit a specific family."""
+    # Super admin and admin can edit all families
+    if user.role in ('super_admin', 'admin'):
+        return True
+    
+    # Check family-specific role
+    family_role = get_user_family_role(session, user, family_id)
+    if family_role in ('admin', 'editor'):
+        return True
+    
+    return False
+
+def can_view_family(session: Session, user: User, family_id: int) -> bool:
+    """Check if user can view a specific family."""
+    # Everyone can view by default, unless family-level restrictions are implemented later
+    return True
+
+def require_family_edit_permission(family_id: int):
+    """Dependency to check family edit permission."""
+    def dependency(user: User = Depends(get_current_user), session: Session = Depends(lambda: Session(engine))) -> User:
+        if not can_edit_family(session, user, family_id):
+            raise HTTPException(status_code=403, detail='当前账号无权编辑该家族')
+        return user
+    return dependency
+
 def filter_member_payload_for_user(user: User, payload: BaseModel, *, for_create: bool) -> Dict[str, Any]:
     data = payload.model_dump(exclude_unset=not for_create)
     caps = get_user_capabilities(user)
@@ -1505,6 +1613,7 @@ def member_to_dict(m: Member, visible_fields: Optional[set[str]] = None, include
         'isPublic': m.is_public,
         'privacyLevel': normalize_privacy_level(m.privacy_level, m.is_public),
         'privacyLabel': PRIVACY_LABELS.get(normalize_privacy_level(m.privacy_level, m.is_public), '公开'),
+        'primaryFamilyId': m.primary_family_id,
     }
     if visible_fields is not None:
         visible = set(visible_fields) | {'id', 'name'}
@@ -2691,6 +2800,13 @@ def create_member(payload: MemberCreate, user: User = Depends(require_capability
             else:
                 raise HTTPException(status_code=403, detail='当前账号新增成员时必须挂接到自己归属分支内的父亲或母亲')
         data['spouse_ids'] = encode_spouse_ids_value(data.get('spouse_ids') or [])
+        
+        # Set primary_family_id if not provided
+        if 'primary_family_id' not in data or data['primary_family_id'] is None:
+            primary_family = session.exec(select(FamilyGroup).where(FamilyGroup.is_primary == True)).first()
+            if primary_family:
+                data['primary_family_id'] = primary_family.id
+        
         m = Member(**data)
         session.add(m)
         session.commit()
@@ -2795,6 +2911,264 @@ def delete_member(member_id: int, user: User = Depends(require_capability('membe
         session.delete(m)
         session.commit()
         return {'ok': True}
+
+@app.get('/families')
+def get_families(user: User = Depends(require_capability('family.view'))):
+    with Session(engine) as session:
+        families = session.exec(select(FamilyGroup).where(FamilyGroup.is_active == True)).all()
+        return [{
+            'id': f.id,
+            'name': f.name,
+            'surname': f.surname,
+            'siteTitle': f.site_title,
+            'coverKicker': f.cover_kicker,
+            'subtitle': f.subtitle,
+            'description': f.description,
+            'rootMemberId': f.root_member_id,
+            'primaryLine': f.primary_line,
+            'isPrimary': f.is_primary,
+            'isActive': f.is_active,
+            'sortOrder': f.sort_order,
+        } for f in families]
+
+@app.get('/families/{family_id}')
+def get_family(family_id: int, user: User = Depends(require_capability('family.view'))):
+    with Session(engine) as session:
+        family = session.get(FamilyGroup, family_id)
+        if not family:
+            raise HTTPException(status_code=404, detail='家族不存在')
+        
+        # Count members in this family
+        member_count = len(session.exec(select(Member).where(Member.primary_family_id == family_id)).all())
+        
+        return {
+            'id': family.id,
+            'name': family.name,
+            'surname': family.surname,
+            'siteTitle': family.site_title,
+            'coverKicker': family.cover_kicker,
+            'subtitle': family.subtitle,
+            'description': family.description,
+            'rootMemberId': family.root_member_id,
+            'primaryLine': family.primary_line,
+            'isPrimary': family.is_primary,
+            'isActive': family.is_active,
+            'sortOrder': family.sort_order,
+            'memberCount': member_count,
+            'createdAt': family.created_at,
+            'updatedAt': family.updated_at,
+        }
+
+@app.put('/families/{family_id}')
+def update_family(family_id: int, payload: Dict[str, Any], user: User = Depends(get_current_user)):
+    with Session(engine) as session:
+        # Check family-level edit permission
+        if not can_edit_family(session, user, family_id):
+            raise HTTPException(status_code=403, detail='当前账号无权编辑该家族')
+        
+        family = session.get(FamilyGroup, family_id)
+        if not family:
+            raise HTTPException(status_code=404, detail='家族不存在')
+        
+        # Update allowed fields
+        allowed_fields = {'name', 'surname', 'site_title', 'cover_kicker', 'subtitle', 'description', 'root_member_id', 'primary_line', 'sort_order'}
+        for key, value in payload.items():
+            snake_key = ''.join(['_' + c.lower() if c.isupper() else c for c in key]).lstrip('_')
+            if snake_key in allowed_fields:
+                setattr(family, snake_key, value)
+        
+        family.updated_at = datetime.now(timezone.utc).isoformat()
+        session.add(family)
+        
+        write_audit_log(session, user, 'family.edit', target_type='family', target_id=family.id, target_label=family.name, detail=payload)
+        session.commit()
+        session.refresh(family)
+        
+        return {
+            'id': family.id,
+            'name': family.name,
+            'surname': family.surname,
+            'siteTitle': family.site_title,
+            'coverKicker': family.cover_kicker,
+            'subtitle': family.subtitle,
+            'description': family.description,
+            'rootMemberId': family.root_member_id,
+            'primaryLine': family.primary_line,
+            'isPrimary': family.is_primary,
+            'isActive': family.is_active,
+            'sortOrder': family.sort_order,
+        }
+
+@app.get('/families/{family_id}/users')
+def get_family_users(family_id: int, user: User = Depends(require_capability('family.view'))):
+    """Get all users with roles in this family."""
+    with Session(engine) as session:
+        family = session.get(FamilyGroup, family_id)
+        if not family:
+            raise HTTPException(status_code=404, detail='家族不存在')
+        
+        roles = session.exec(
+            select(UserFamilyRole).where(UserFamilyRole.family_id == family_id)
+        ).all()
+        
+        result = []
+        for role in roles:
+            user_obj = session.get(User, role.user_id)
+            if user_obj:
+                result.append({
+                    'userId': user_obj.id,
+                    'username': user_obj.username,
+                    'displayName': user_obj.display_name,
+                    'role': role.role,
+                    'createdAt': role.created_at,
+                })
+        
+        return result
+
+@app.post('/families/{family_id}/users')
+def add_family_user(family_id: int, payload: Dict[str, Any], user: User = Depends(get_current_user)):
+    """Assign a user to this family with a specific role."""
+    with Session(engine) as session:
+        if not can_edit_family(session, user, family_id):
+            raise HTTPException(status_code=403, detail='当前账号无权管理该家族的用户权限')
+        
+        family = session.get(FamilyGroup, family_id)
+        if not family:
+            raise HTTPException(status_code=404, detail='家族不存在')
+        
+        target_user_id = payload.get('userId')
+        role = payload.get('role', 'viewer')
+        
+        if not target_user_id:
+            raise HTTPException(status_code=400, detail='缺少 userId 参数')
+        
+        target_user = session.get(User, target_user_id)
+        if not target_user:
+            raise HTTPException(status_code=404, detail='用户不存在')
+        
+        # Check if already exists
+        existing = session.exec(
+            select(UserFamilyRole)
+            .where(UserFamilyRole.user_id == target_user_id)
+            .where(UserFamilyRole.family_id == family_id)
+        ).first()
+        
+        if existing:
+            existing.role = role
+            existing.updated_at = datetime.now(timezone.utc).isoformat()
+            session.add(existing)
+        else:
+            new_role = UserFamilyRole(
+                user_id=target_user_id,
+                family_id=family_id,
+                role=role,
+            )
+            session.add(new_role)
+        
+        write_audit_log(session, user, 'family.assign_user', target_type='family', target_id=family.id, target_label=family.name, detail={'targetUserId': target_user_id, 'role': role})
+        session.commit()
+        
+        return {'ok': True}
+
+@app.delete('/families/{family_id}/users/{user_id}')
+def remove_family_user(family_id: int, user_id: int, user: User = Depends(get_current_user)):
+    """Remove a user's role from this family."""
+    with Session(engine) as session:
+        if not can_edit_family(session, user, family_id):
+            raise HTTPException(status_code=403, detail='当前账号无权管理该家族的用户权限')
+        
+        role = session.exec(
+            select(UserFamilyRole)
+            .where(UserFamilyRole.user_id == user_id)
+            .where(UserFamilyRole.family_id == family_id)
+        ).first()
+        
+        if not role:
+            raise HTTPException(status_code=404, detail='该用户在此家族中没有角色')
+        
+        session.delete(role)
+        write_audit_log(session, user, 'family.remove_user', target_type='family', target_id=family_id, target_label=str(family_id), detail={'targetUserId': user_id})
+        session.commit()
+        
+        return {'ok': True}
+
+@app.get('/families/{family_id}/tree')
+def get_family_tree(family_id: int, user: User = Depends(require_capability('tree.view'))):
+    with Session(engine) as session:
+        family = session.get(FamilyGroup, family_id)
+        if not family:
+            raise HTTPException(status_code=404, detail='家族不存在')
+        
+        visibility = build_member_visibility(session, user)
+        default_visible_fields = resolve_visible_member_fields(session, user)
+        
+        # Filter members by primary_family_id
+        all_members = session.exec(select(Member).where(Member.primary_family_id == family_id)).all()
+        
+        if visibility is None:
+            visible_ids = {m.id for m in all_members if m.id is not None}
+            tree_nodes = build_tree(session, allowed_ids=visible_ids, visible_fields=default_visible_fields)
+            return {'nodes': tree_nodes}
+        
+        visible_ids = {m.id for m in all_members if m.id is not None and can_view_member_with_visibility(user, m, visibility)}
+        visible_fields_by_id = {}
+        visibility_scope_by_id = {}
+        for member_id in visible_ids:
+            scope = member_visibility_scope(member_id, visibility)
+            visible_fields_by_id[member_id] = visible_fields_for_scope(default_visible_fields, scope)
+            visibility_scope_by_id[member_id] = scope
+        
+        tree_nodes = build_tree(
+            session,
+            allowed_ids=visible_ids,
+            visible_fields=default_visible_fields,
+            visible_fields_by_id=visible_fields_by_id,
+            visibility_scope_by_id=visibility_scope_by_id,
+        )
+        return {'nodes': tree_nodes}
+
+@app.get('/members/{member_id}/ancestry')
+def get_member_ancestry(
+    member_id: int,
+    mode: str = 'four-line',
+    generations: int = 3,
+    user: User = Depends(require_capability('member.view'))
+):
+    with Session(engine) as session:
+        member = session.get(Member, member_id)
+        if not member:
+            raise HTTPException(status_code=404, detail='成员不存在')
+        
+        all_members = session.exec(select(Member)).all()
+        by_id = {m.id: m for m in all_members if m.id is not None}
+        
+        def trace_line(start_id: int, parent_getter, max_gen: int):
+            line = []
+            current_id = start_id
+            for _ in range(max_gen):
+                if current_id is None or current_id not in by_id:
+                    break
+                current = by_id[current_id]
+                line.append(member_to_dict(current, include_relations=False, by_id=by_id, all_members=all_members))
+                current_id = parent_getter(current)
+            return line
+        
+        result = {
+            'member': member_to_dict(member, include_relations=False, by_id=by_id, all_members=all_members),
+            'lines': {}
+        }
+        
+        if mode == 'four-line':
+            result['lines']['paternal'] = trace_line(member.father_id, lambda m: m.father_id, generations)
+            result['lines']['maternal'] = trace_line(member.mother_id, lambda m: m.father_id, generations)
+            if member.father_id and member.father_id in by_id:
+                father = by_id[member.father_id]
+                result['lines']['paternal_maternal'] = trace_line(father.mother_id, lambda m: m.father_id, generations)
+            if member.mother_id and member.mother_id in by_id:
+                mother = by_id[member.mother_id]
+                result['lines']['maternal_maternal'] = trace_line(mother.mother_id, lambda m: m.father_id, generations)
+        
+        return result
 
 @app.get('/tree')
 def tree(user: User = Depends(require_capability('tree.view'))):
