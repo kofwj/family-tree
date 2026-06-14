@@ -140,14 +140,7 @@ curl -fsS http://localhost:3000/health
 - 备份创建使用 SQLite online backup；恢复前会执行 SQLite 完整性和必要表结构校验，恢复过程采用 staging + 原子替换，并在失败时尝试回滚到恢复前安全备份。
 - 前端 Nginx 配置包含 `client_max_body_size`、CSP、`X-Content-Type-Options`、`X-Frame-Options`、`Referrer-Policy` 和 `Permissions-Policy` 等基础安全头。
 
-运行时数据、本地导入文件、备份产物和环境配置不属于源码交付内容，应由 `.gitignore` 排除。上传 GitHub 前建议检查：
-
-```bash
-git status --short
-git diff --cached --name-only
-```
-
-确认只提交源码、配置模板、测试和文档，不提交真实运行数据或本地环境配置。
+真实运行数据、本地导入文件、备份产物和环境配置不属于源码交付内容，应由 `.gitignore` 排除。
 
 ## 生产部署建议
 
