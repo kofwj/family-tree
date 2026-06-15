@@ -429,7 +429,7 @@ function renderChart() {
           r0: '45%',
           r: '70%',
           label: {
-            align: 'right',
+            rotate: 'tangential',
             fontSize: 10,
             color: '#ffffff',
             textBorderColor: 'rgba(0,0,0,0.6)',
@@ -440,11 +440,11 @@ function renderChart() {
           r0: '70%',
           r: '92%',
           label: {
-            position: 'outside',
-            padding: 3,
-            silent: false,
+            rotate: 'tangential',
             fontSize: 9,
-            color: '#333333'
+            color: '#ffffff',
+            textBorderColor: 'rgba(0,0,0,0.6)',
+            textBorderWidth: 2
           },
           itemStyle: {
             borderWidth: 1.5

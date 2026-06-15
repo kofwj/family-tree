@@ -1877,7 +1877,25 @@ def build_tree(session: Session, allowed_ids: Optional[set[int]] = None, visible
     def resolve_parent(member: Member) -> Optional[Member]:
         father = by_id.get(member.father_id) if member.father_id else None
         mother = by_id.get(member.mother_id) if member.mother_id else None
+        
+        def has_parents(m: Member) -> bool:
+            if m.father_id and m.father_id in by_id:
+                return True
+            if m.mother_id and m.mother_id in by_id:
+                return True
+            if m.father_name and first_by_name(m.father_name):
+                return True
+            if m.mother_name and first_by_name(m.mother_name):
+                return True
+            return False
+
         if father and mother:
+            father_has = has_parents(father)
+            mother_has = has_parents(mother)
+            if mother_has and not father_has:
+                return mother
+            if father_has and not mother_has:
+                return father
             if getattr(mother, 'is_core_member', True) and not getattr(father, 'is_core_member', True):
                 return mother
             return father

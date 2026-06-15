@@ -216,6 +216,40 @@ def get_family_tree(family_id: int, user: main.User = Depends(main.require_capab
                 select(main.Member).where(main.Member.primary_family_id == family_id)
             ).all()
         
+        # Crawl descendants and their spouses recursively
+        db_members = session.exec(select(main.Member)).all()
+        by_id = {m.id: m for m in db_members if m.id is not None}
+        family_member_ids = {m.id for m in all_members if m.id is not None}
+        
+        def get_spouse_ids(m: main.Member) -> list[int]:
+            if not m.spouse_ids:
+                return []
+            import json
+            try:
+                return [int(x) for x in json.loads(m.spouse_ids) if x is not None]
+            except Exception:
+                return []
+
+        added = True
+        while added:
+            added = False
+            # 1. Add descendants
+            for m in db_members:
+                if m.id is not None and m.id not in family_member_ids:
+                    if (m.father_id and m.father_id in family_member_ids) or (m.mother_id and m.mother_id in family_member_ids):
+                        family_member_ids.add(m.id)
+                        all_members.append(m)
+                        added = True
+            
+            # 2. Add spouses of descendants
+            for m in db_members:
+                if m.id is not None and m.id in family_member_ids:
+                    for sp_id in get_spouse_ids(m):
+                        if sp_id in by_id and sp_id not in family_member_ids:
+                            family_member_ids.add(sp_id)
+                            all_members.append(by_id[sp_id])
+                            added = True
+        
         if visibility is None:
             visible_ids = {m.id for m in all_members if m.id is not None}
             tree_nodes = main.build_tree(session, allowed_ids=visible_ids, visible_fields=default_visible_fields)
