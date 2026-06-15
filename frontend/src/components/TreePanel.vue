@@ -643,11 +643,22 @@ const visibleReaderItems = computed(() => {
 
 const generationColumns = computed(() => {
   const map = new Map()
+  const indexMap = new Map()
+  readerItems.value.forEach((item, index) => {
+    indexMap.set(item.id, index)
+  })
   for (const item of visibleReaderItems.value) {
     if (!map.has(item.generation)) map.set(item.generation, [])
     map.get(item.generation).push(item)
   }
-  return [...map.entries()].sort((a, b) => a[0] - b[0]).map(([generation, items]) => ({ generation, items: items.sort(sortByGenealogy) }))
+  return [...map.entries()].sort((a, b) => a[0] - b[0]).map(([generation, items]) => {
+    const sortedItems = [...items].sort((a, b) => {
+      const idxA = indexMap.get(a.id) ?? 999999
+      const idxB = indexMap.get(b.id) ?? 999999
+      return idxA - idxB
+    })
+    return { generation, items: sortedItems }
+  })
 })
 
 const summaryMember = computed(() => {
