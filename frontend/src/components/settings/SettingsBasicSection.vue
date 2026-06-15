@@ -4,14 +4,30 @@
       <div class="settings-header">
         <div>
           <strong>治理域一：基础设置</strong>
-          <p>修改族谱在首页、侧栏和总览里的展示名称。</p>
+          <p>修改当前主家族在首页、登录页、工作台侧栏和总览里的展示名称。</p>
         </div>
         <el-tag type="success">可即时生效</el-tag>
       </div>
     </template>
 
+    <el-alert
+      class="settings-scope-alert"
+      type="info"
+      :closable="false"
+      show-icon
+      title="这些是全站公开展示项"
+    >
+      <template #default>
+        <div class="settings-scope-copy">
+          <span>可修改角色：超级管理员、管理员。</span>
+          <span>保存后，未登录首页、登录页以及所有已登录用户的工作台都会看到新的族谱名称和副标题。</span>
+          <span>当前版本以单一主家族为展示中心；母系、姻亲和外家成员通过成员关系记录，不默认展开为并列主谱。</span>
+        </div>
+      </template>
+    </el-alert>
+
     <el-form label-position="top">
-      <el-form-item label="族谱名称">
+      <el-form-item label="当前主家族名称">
         <el-input v-model="draft.siteTitle" :disabled="readonly" maxlength="32" show-word-limit placeholder="例如：陈氏宗族家谱" />
       </el-form-item>
       <el-form-item label="族徽文字 / 姓氏">
