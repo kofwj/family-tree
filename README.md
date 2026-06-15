@@ -31,7 +31,19 @@
 ```text
 .
 ├── backend/              # FastAPI 后端
+│   ├── alembic/          # 数据库迁移脚本目录
+│   ├── routes/           # 拆分后的专有路由模块
+│   ├── main.py           # 极简入口与生命周期管理
+│   ├── database.py       # 数据库配置与连接池
+│   ├── models.py         # SQLModel 数据库模型
+│   ├── schemas.py        # Pydantic 数据模式
+│   ├── auth.py           # 权限及安全验证
+│   └── helpers.py        # 辅助函数与业务逻辑
 ├── frontend/             # Vue 前端
+│   ├── src/
+│   │   ├── components/   # UI 组件
+│   │   ├── utils/        # 工具函数（包含归口提取的 genealogy.js 世代及色彩逻辑）
+│   │   └── views/        # 页面视图
 ├── scripts/              # 备份、部署、关系回填脚本
 ├── docs/                 # 设计文档和阶段记录
 ├── data/                 # 本地运行数据目录
@@ -99,6 +111,26 @@ python -m pytest tests -q
 ```bash
 PYTHONPYCACHEPREFIX=/tmp/family-tree-pycache python -m py_compile backend/main.py check_layout.py test_crud.py scripts/*.py tests/*.py
 ```
+
+### 数据库迁移 (Alembic)
+
+系统集成了 Alembic 进行数据库版本管理。当修改 `backend/models.py` 导致数据库 schema 变化时，可以生成并应用迁移脚本：
+
+1. **生成迁移脚本 (Autogenerate)**：
+   ```bash
+   # 在项目根目录下执行（指定后端 alembic.ini 配置文件）
+   python -m alembic -c backend/alembic.ini revision --autogenerate -m "描述你的修改"
+   ```
+2. **手动应用升级 (Upgrade)**：
+   ```bash
+   python -m alembic -c backend/alembic.ini upgrade head
+   ```
+3. **查看当前版本状态 (Current Status)**：
+   ```bash
+   python -m alembic -c backend/alembic.ini current
+   ```
+
+> 💡 **自动迁移**：容器或本地服务启动时，后端会自动调用 Alembic API 将数据库更新到最新（`head`）版本，因此一般生产部署无需手动执行迁移命令。
 
 ### 前端构建
 
