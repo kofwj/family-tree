@@ -557,14 +557,14 @@ function addTileLayer() {
   let options = {}
   
   if (mapSource.value === 'gaode') {
-    url = 'https://wprd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scl=1&style=7&x={x}&y={y}&z={z}'
+    url = '//wprd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scl=1&style=7&x={x}&y={y}&z={z}'
     options = {
       subdomains: ['1', '2', '3', '4'],
       maxZoom: 18,
       attribution: '&copy; 高德地图'
     }
   } else {
-    url = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
+    url = '//{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
     options = {
       subdomains: ['a', 'b', 'c'],
       maxZoom: 19,
