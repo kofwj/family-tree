@@ -1,30 +1,4 @@
 import os
-import sys
-import tempfile
-
-# Bootstrapper to resolve 'backend' package import issues when running inside Docker container.
-current_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in locals() else os.getcwd()
-backend_dir = None
-while current_dir and current_dir != '/':
-    if os.path.exists(os.path.join(current_dir, 'database.py')):
-        backend_dir = current_dir
-        break
-    current_dir = os.path.dirname(current_dir)
-if not backend_dir:
-    backend_dir = '/app'
-
-if os.path.basename(backend_dir) != 'backend':
-    tmp_dir = os.path.join(tempfile.gettempdir(), 'family_tree_backend_path')
-    os.makedirs(tmp_dir, exist_ok=True)
-    symlink_path = os.path.join(tmp_dir, 'backend')
-    if not os.path.exists(symlink_path):
-        try:
-            os.symlink(backend_dir, symlink_path)
-        except Exception:
-            pass
-    if tmp_dir not in sys.path:
-        sys.path.insert(0, tmp_dir)
-
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
