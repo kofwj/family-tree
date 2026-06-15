@@ -12,36 +12,76 @@
         </div>
 
         <div class="workspace-topbar__meta">
-          <div class="topbar-mini-card" v-if="families.length > 0">
-            <span>当前家族</span>
-            <el-select 
-              v-model="currentFamilyId" 
-              @change="switchFamily" 
-              size="small" 
-              style="width: 140px"
-            >
-              <el-option
-                v-for="family in families"
-                :key="family.id"
-                :label="family.name"
-                :value="family.id"
+          <div class="meta-card meta-card--primary" v-if="families.length > 0">
+            <div class="meta-card__icon">
+              <el-icon><OfficeBuilding /></el-icon>
+            </div>
+            <div class="meta-card__content">
+              <span class="meta-card__label">当前家族</span>
+              <el-select 
+                v-model="currentFamilyId" 
+                @change="switchFamily" 
+                size="small"
+                class="meta-card__select"
               >
-                <span>{{ family.name }}</span>
-                <el-tag v-if="family.isPrimary" type="success" size="small" style="margin-left: 8px">主</el-tag>
-              </el-option>
-            </el-select>
+                <el-option
+                  v-for="family in families"
+                  :key="family.id"
+                  :label="family.name"
+                  :value="family.id"
+                >
+                  <span>{{ family.name }}</span>
+                  <el-tag v-if="family.isPrimary" type="success" size="small" style="margin-left: 8px">主</el-tag>
+                </el-option>
+              </el-select>
+            </div>
           </div>
-          <div class="topbar-mini-card">
-            <span>当前视图</span>
-            <strong>{{ currentSectionLabel }}</strong>
+          
+          <div class="meta-card">
+            <div class="meta-card__icon">
+              <el-icon><View /></el-icon>
+            </div>
+            <div class="meta-card__content">
+              <span class="meta-card__label">当前视图</span>
+              <strong class="meta-card__value">{{ currentSectionLabel }}</strong>
+            </div>
           </div>
-          <div class="topbar-mini-card">
-            <span>当前角色</span>
-            <strong>{{ roleLabel }}</strong>
+          
+          <div class="meta-card">
+            <div class="meta-card__icon">
+              <el-icon><User /></el-icon>
+            </div>
+            <div class="meta-card__content">
+              <span class="meta-card__label">当前角色</span>
+              <strong class="meta-card__value">{{ roleLabel }}</strong>
+            </div>
           </div>
-          <div class="topbar-mini-card">
-            <span>成员 / 世代 / 分支 / 备份</span>
-            <strong>{{ members.length }} / {{ generationCount }} / {{ tree.length }} / {{ backups.length }}</strong>
+          
+          <div class="meta-card meta-card--stats">
+            <div class="meta-card__icon">
+              <el-icon><DataAnalysis /></el-icon>
+            </div>
+            <div class="meta-card__content">
+              <span class="meta-card__label">数据统计</span>
+              <div class="meta-card__stats">
+                <div class="stat-item">
+                  <span class="stat-value">{{ members.length }}</span>
+                  <span class="stat-label">成员</span>
+                </div>
+                <div class="stat-item">
+                  <span class="stat-value">{{ generationCount }}</span>
+                  <span class="stat-label">世代</span>
+                </div>
+                <div class="stat-item">
+                  <span class="stat-value">{{ tree.length }}</span>
+                  <span class="stat-label">分支</span>
+                </div>
+                <div class="stat-item">
+                  <span class="stat-value">{{ backups.length }}</span>
+                  <span class="stat-label">备份</span>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 

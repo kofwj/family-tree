@@ -126,10 +126,107 @@ body {
   line-height: 1.5;
 }
 .workspace-topbar__meta {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: stretch;
 }
+
+/* 新的图标卡片样式 */
+.meta-card {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--card-bg) 95%, #fff);
+  border-radius: 12px;
+  padding: 10px 14px;
+  min-width: 0;
+  transition: all 0.2s ease;
+}
+
+.meta-card:hover {
+  border-color: color-mix(in srgb, var(--border) 70%, var(--el-color-primary));
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+.meta-card__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, var(--el-color-primary-light-9), var(--el-color-primary-light-8));
+  color: var(--el-color-primary);
+  flex-shrink: 0;
+}
+
+.meta-card__icon .el-icon {
+  font-size: 18px;
+}
+
+.meta-card__content {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.meta-card__label {
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.2;
+}
+
+.meta-card__value {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.3;
+}
+
+.meta-card__select {
+  width: 140px;
+}
+
+.meta-card--primary .meta-card__icon {
+  background: linear-gradient(135deg, #e8f4fd, #d0e9fb);
+  color: var(--el-color-primary);
+}
+
+.meta-card--stats {
+  flex: 1;
+  min-width: 280px;
+}
+
+.meta-card__stats {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+}
+
+.stat-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.stat-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--el-color-primary);
+  line-height: 1.2;
+}
+
+.stat-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.2;
+}
+
+/* 旧样式保留（向后兼容） */
 .topbar-mini-card {
   border: 1px solid var(--border);
   background: color-mix(in srgb, var(--card-bg) 92%, #fff);
