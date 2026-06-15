@@ -46,8 +46,12 @@
         </div>
 
         <div class="workspace-topbar__actions">
-          <el-button type="primary" @click="loadAll">刷新</el-button>
-          <el-button v-if="can('member.import')" @click="downloadImportTemplate">下载导入样表</el-button>
+          <el-tooltip content="刷新数据" placement="bottom">
+            <el-button type="primary" circle icon="Refresh" @click="loadAll" />
+          </el-tooltip>
+          <el-tooltip content="下载导入样表" placement="bottom" v-if="can('member.import')">
+            <el-button circle icon="Download" @click="downloadImportTemplate" />
+          </el-tooltip>
           <el-upload
             v-if="can('member.import')"
             :show-file-list="false"
@@ -55,11 +59,17 @@
             accept=".xlsx,.xls"
             :on-change="uploadMemberExcel"
           >
-            <el-button>上传成员表格</el-button>
+            <el-tooltip content="上传成员表格" placement="bottom">
+              <el-button circle icon="Upload" />
+            </el-tooltip>
           </el-upload>
-          <el-button v-if="can('backup.create')" type="warning" @click="backup">手动备份</el-button>
-          <el-button @click="toggleTheme">{{ darkMode ? '切换浅色' : '切换深色' }}</el-button>
-          <el-button type="danger" plain @click="logout">退出</el-button>
+          <el-tooltip content="手动备份" placement="bottom" v-if="can('backup.create')">
+            <el-button type="warning" circle icon="FolderOpened" @click="backup" />
+          </el-tooltip>
+          <el-tooltip :content="darkMode ? '切换浅色模式' : '切换深色模式'" placement="bottom">
+            <el-button circle :icon="darkMode ? 'Sunny' : 'Moon'" @click="toggleTheme" />
+          </el-tooltip>
+          <el-button type="danger" @click="logout">退出</el-button>
         </div>
       </div>
 

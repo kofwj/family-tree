@@ -1,93 +1,72 @@
 <template>
   <div class="members-page">
-    <section class="quality-board">
-      <div class="quality-board__hero">
-        <div>
-          <p class="quality-board__eyebrow">宗亲资料质检台</p>
+    <section class="quality-board-compact">
+      <div class="quality-board-compact__header">
+        <div class="quality-board-compact__title">
           <h3>成员录数据质量视图</h3>
-          <p>优先把可补录成员、主线成员缺项和基础关系缺口快速筛出来，适合持续补档。</p>
+          <p>优先筛选可补录成员、主线成员缺项和基础关系缺口</p>
         </div>
-        <div class="quality-board__summary">
-          <div class="summary-pill">
+        <div class="quality-board-compact__stats">
+          <div class="stat-item">
             <span>平均完整度</span>
-            <strong>{{ averageCompleteness }}%</strong>
+            <strong :class="{ 'stat-success': averageCompleteness >= 80, 'stat-warning': averageCompleteness >= 60 && averageCompleteness < 80, 'stat-danger': averageCompleteness < 60 }">{{ averageCompleteness }}%</strong>
           </div>
-          <div class="summary-pill summary-pill--warn" v-if="incompleteCount">
+          <div class="stat-item stat-divider">
             <span>待补成员</span>
-            <strong>{{ incompleteCount }}</strong>
+            <strong class="stat-warning">{{ incompleteCount }}</strong>
           </div>
-          <div class="summary-pill summary-pill--neutral">
+          <div class="stat-item stat-divider">
             <span>当前结果</span>
             <strong>{{ filteredMembers.length }}</strong>
           </div>
         </div>
       </div>
 
-      <div class="quality-board__grid">
-        <button
-          v-for="item in dashboardCards"
-          :key="item.value"
-          type="button"
-          class="quality-card"
-          :class="[
-            `quality-card--${item.tone || 'default'}`,
-            { 'quality-card--active': qualityFilter === item.value },
-          ]"
-          @click="toggleQualityFilter(item.value)"
+      <div class="quality-board-compact__filters">
+        <el-select v-model="qualityFilter" class="filter-primary" placeholder="数据质量视图">
+          <el-option v-for="item in qualityOptions" :key="item.value" :label="item.label" :value="item.value">
+            <span>{{ item.label }}</span>
+            <el-tag :type="item.tagType || 'info'" size="small" style="margin-left: 8px">{{ qualityCounts[item.value] || 0 }}</el-tag>
+          </el-option>
+        </el-select>
+        
+        <el-select
+          v-if="qualityFilter === 'lowCompleteness'"
+          v-model="lowCompletenessThreshold"
+          class="filter-secondary"
+          placeholder="完整度阈值"
         >
-          <div class="quality-card__head">
-            <span class="quality-card__label">{{ item.label }}</span>
-            <strong class="quality-card__count">{{ qualityCounts[item.value] || 0 }}</strong>
-          </div>
-          <p class="quality-card__desc">{{ item.description }}</p>
-        </button>
+          <el-option label="低于 50%" :value="50" />
+          <el-option label="低于 60%" :value="60" />
+          <el-option label="低于 70%" :value="70" />
+          <el-option label="低于 80%" :value="80" />
+        </el-select>
+
+        <el-input
+          v-model="keyword"
+          class="filter-search"
+          clearable
+          placeholder="搜索姓名、配偶、父母、出生地、居住地"
+          prefix-icon="Search"
+        />
+
+        <el-select v-model="genderFilter" class="filter-secondary" placeholder="性别" clearable>
+          <el-option label="男" value="男" />
+          <el-option label="女" value="女" />
+        </el-select>
+
+        <el-select v-model="generationFilter" class="filter-secondary" placeholder="世代" clearable>
+          <el-option v-for="g in generations" :key="g" :label="`第${g}代`" :value="g" />
+        </el-select>
       </div>
 
-      <div class="quality-board__toolbar">
-        <div class="toolbar-left">
-          <el-input
-            v-model="keyword"
-            class="member-search"
-            clearable
-            placeholder="搜索姓名、配偶、父母、出生地、居住地"
-          />
-          <el-select v-model="genderFilter" class="toolbar-select" placeholder="性别" clearable>
-            <el-option label="男" value="男" />
-            <el-option label="女" value="女" />
-          </el-select>
-          <el-select v-model="generationFilter" class="toolbar-select" placeholder="世代" clearable>
-            <el-option v-for="g in generations" :key="g" :label="`第${g}代`" :value="g" />
-          </el-select>
-          <el-select v-model="qualityFilter" class="toolbar-select quality-select" placeholder="数据质量视图">
-            <el-option v-for="item in qualityOptions" :key="item.value" :label="item.label" :value="item.value" />
-          </el-select>
-          <el-select
-            v-if="qualityFilter === 'lowCompleteness'"
-            v-model="lowCompletenessThreshold"
-            class="toolbar-select threshold-select"
-            placeholder="完整度阈值"
-          >
-            <el-option label="低于 50%" :value="50" />
-            <el-option label="低于 60%" :value="60" />
-            <el-option label="低于 70%" :value="70" />
-            <el-option label="低于 80%" :value="80" />
-          </el-select>
-        </div>
-
-        <div class="toolbar-right">
-          <el-tag v-if="activeQualityMeta" :type="activeQualityMeta.tagType || 'warning'">{{ activeQualityMeta.label }}</el-tag>
-          <el-tag :type="averageCompleteness >= 80 ? 'success' : averageCompleteness >= 60 ? 'warning' : 'danger'">
-            平均完整度 {{ averageCompleteness }}%
-          </el-tag>
-          <el-tag v-if="incompleteCount" type="warning">待补 {{ incompleteCount }} 人</el-tag>
-          <el-tag type="info">共 {{ filteredMembers.length }} 人</el-tag>
-          <el-button v-if="canConfigFields" size="small" plain @click="openFieldDialog">显示字段</el-button>
-          <el-button size="small" plain @click="resetFilters">重置筛选</el-button>
-          <el-radio-group v-model="mode" size="small">
-            <el-radio-button label="table">表格</el-radio-button>
-            <el-radio-button label="card">卡片</el-radio-button>
-          </el-radio-group>
-        </div>
+      <div class="quality-board-compact__actions">
+        <el-button v-if="canConfigFields" size="small" plain @click="openFieldDialog">显示字段</el-button>
+        <el-button size="small" plain @click="resetFilters">重置筛选</el-button>
+        <el-radio-group v-model="mode" size="small">
+          <el-radio-button label="table">表格</el-radio-button>
+          <el-radio-button label="card">卡片</el-radio-button>
+        </el-radio-group>
       </div>
     </section>
 
@@ -632,6 +611,109 @@ function open(member) {
   gap: 14px;
 }
 
+/* 新紧凑布局样式 */
+.quality-board-compact {
+  border-radius: 12px;
+  padding: 16px;
+  background: linear-gradient(180deg, rgba(250, 246, 238, 0.98), rgba(245, 237, 225, 0.94));
+  border: 1px solid rgba(133, 94, 66, 0.12);
+  box-shadow: 0 4px 12px rgba(84, 55, 27, 0.06);
+}
+
+.quality-board-compact__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+  margin-bottom: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid rgba(133, 94, 66, 0.1);
+}
+
+.quality-board-compact__title h3 {
+  margin: 0 0 4px;
+  font-size: 18px;
+  color: #5f4228;
+  font-weight: 600;
+}
+
+.quality-board-compact__title p {
+  margin: 0;
+  color: #7d644b;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.quality-board-compact__stats {
+  display: flex;
+  gap: 20px;
+  align-items: center;
+}
+
+.stat-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.stat-item span {
+  font-size: 12px;
+  color: #7d644b;
+}
+
+.stat-item strong {
+  font-size: 24px;
+  color: #5f4228;
+  font-weight: 700;
+}
+
+.stat-item.stat-divider {
+  padding-left: 20px;
+  border-left: 1px solid rgba(133, 94, 66, 0.15);
+}
+
+.stat-success {
+  color: #67c23a !important;
+}
+
+.stat-warning {
+  color: #e6a23c !important;
+}
+
+.stat-danger {
+  color: #f56c6c !important;
+}
+
+.quality-board-compact__filters {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.filter-primary {
+  width: 240px;
+}
+
+.filter-secondary {
+  width: 140px;
+}
+
+.filter-search {
+  flex: 1;
+  min-width: 260px;
+}
+
+.quality-board-compact__actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+/* 旧样式保留（向后兼容） */
 .quality-board {
   border-radius: 20px;
   padding: 18px;
