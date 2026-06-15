@@ -2479,7 +2479,7 @@ def build_data_quality_report(session: Session) -> Dict[str, Any]:
             add('warning', 'life_status_conflict', m, '标记健在但存在去世日期/记载')
         if m.is_living is False and not (normalize_name_value(m.death_date) or normalize_name_value(m.death_lunar_date) or normalize_name_value(m.death_date_text)):
             add('info', 'missing_death_info', m, '已故成员缺少去世日期或原始记载')
-        if min_generation is not None and m.generation and m.generation > min_generation and not (m.father_id or m.mother_id or normalize_name_value(m.father_name) or normalize_name_value(m.mother_name)):
+        if min_generation is not None and m.generation is not None and m.generation > min_generation and not (m.father_id or m.mother_id or normalize_name_value(m.father_name) or normalize_name_value(m.mother_name)):
             add('warning', 'missing_parent', m, '非始祖世代成员缺少父母关系')
         if not normalize_name_value(m.source) and m.id not in cited_member_ids:
             add('info', 'missing_source', m, '缺少资料来源或引用记录')
