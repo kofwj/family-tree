@@ -489,6 +489,7 @@ const readerItems = computed(() => {
       branchKey: branchInfo.key,
       branchLabel: branchInfo.label === '主源' ? '' : branchInfo.label,
       branchColor: branchInfo.color,
+      branchIndex: branchInfo.index,
       spouseNames,
       childCount: Math.max(children.length, relationChildren.length),
       descendantCount: Math.max(descendantCount(node), relationDescendants),
@@ -555,6 +556,7 @@ const readerItems = computed(() => {
       branchKey: parentItem?.branchKey || 'main',
       branchLabel: parentItem?.branchLabel || member.branch || '',
       branchColor: parentItem?.branchColor || palette[0],
+      branchIndex: parentItem?.branchIndex ?? 0,
       spouseNames,
       childCount: relationChildren.length,
       descendantCount: relationDescendants,
@@ -667,12 +669,13 @@ const branchOptions = computed(() => {
         key: item.branchKey,
         label: item.branchKey === 'main' ? '主源' : (item.branchLabel || '未分支'),
         color: item.branchColor,
+        index: item.branchKey === 'main' ? -1 : (item.branchIndex ?? 0),
         count: 0,
       })
     }
     map.get(item.branchKey).count += 1
   }
-  const branches = [...map.values()].sort((a, b) => (a.key === 'main' ? -1 : b.key === 'main' ? 1 : String(a.label).localeCompare(String(b.label), 'zh-Hans-CN')))
+  const branches = [...map.values()].sort((a, b) => a.index - b.index)
   return [{ key: 'all', label: '全部分支', color: '#8b7154', count: readerItems.value.length }, ...branches]
 })
 
