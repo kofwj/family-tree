@@ -707,6 +707,8 @@ def ensure_default_family_group(session: Session):
         )
         session.add(family)
         session.commit()
+        session.refresh(family)
+    return family
 
 def ensure_member_primary_family(session: Session):
     primary_family = session.exec(select(FamilyGroup).where(FamilyGroup.is_primary == True)).first()
@@ -1806,11 +1808,40 @@ def import_excel(path: str, replace=True) -> int:
         try:
             if replace:
                 clear_member_dependent_records_for_replace_import(session)
+            
+            # 确保默认家族存在
+            default_family = ensure_default_family_group(session)
+            
+            # 如果有"所属家族"列，预先收集所有家族名称并创建/查找
+            family_name_to_id = {}
+            if '所属家族' in df.columns:
+                unique_family_names = set(clean(r['所属家族']) for _, r in df.iterrows() if clean(r['所属家族']))
+                for family_name in unique_family_names:
+                    if not family_name:
+                        continue
+                    existing = session.exec(select(FamilyGroup).where(FamilyGroup.name == family_name)).first()
+                    if existing:
+                        family_name_to_id[family_name] = existing.id
+                    else:
+                        # 创建新家族
+                        new_family = FamilyGroup(name=family_name, description='从导入表格自动创建')
+                        session.add(new_family)
+                        session.flush()
+                        if new_family.id:
+                            family_name_to_id[family_name] = new_family.id
+            
             count = 0
+            member_family_mapping = []  # 保存 (member, family_id) 用于后续建立关联
+            
             for _, r in df.iterrows():
                 name = clean(r['姓名'])
                 if not name:
                     continue
+                
+                # 确定所属家族
+                family_name = clean(r['所属家族']) if '所属家族' in df.columns else None
+                primary_family_id = family_name_to_id.get(family_name) if family_name else default_family.id
+                
                 m = Member(
                     name=name, gender=clean(r['性别']), generation=clean_int(r['世代']),
                     generation_name=clean(r['字辈']), rank_no=clean_int(r['排行序号']), rank_title=clean(r['排行称谓']),
@@ -1820,9 +1851,11 @@ def import_excel(path: str, replace=True) -> int:
                     burial_lat=to_float(clean(r['安葬纬度'])) if '安葬纬度' in df.columns else None,
                     burial_lng=to_float(clean(r['安葬经度'])) if '安葬经度' in df.columns else None,
                     photo_path=clean(r['照片地址']) if '照片地址' in df.columns else None,
-                    father_name=clean(r['父亲']), mother_name=clean(r['母亲'])
+                    father_name=clean(r['父亲']), mother_name=clean(r['母亲']),
+                    primary_family_id=primary_family_id
                 )
                 session.add(m)
+                member_family_mapping.append((m, primary_family_id))
                 count += 1
             session.flush()
 
@@ -1848,6 +1881,21 @@ def import_excel(path: str, replace=True) -> int:
                 m.spouse_ids = encode_spouse_ids_value(uniq_spouse_ids)
                 session.add(m)
             session.flush()
+            
+            # 建立成员-家族关联
+            for member, family_id in member_family_mapping:
+                if member.id and family_id:
+                    # 检查是否已存在关联
+                    existing_link = session.exec(
+                        select(MemberFamilyLink).where(
+                            MemberFamilyLink.member_id == member.id,
+                            MemberFamilyLink.family_id == family_id
+                        )
+                    ).first()
+                    if not existing_link:
+                        link = MemberFamilyLink(member_id=member.id, family_id=family_id)
+                        session.add(link)
+            
             for m in members:
                 sync_member_spouse_links(session, m.id, [], parse_spouse_ids_value(m.spouse_ids))
             session.commit()
@@ -1859,22 +1907,22 @@ def import_excel(path: str, replace=True) -> int:
 
 def ensure_import_template() -> Path:
     path = DATA_DIR / 'members-import-template.xlsx'
-    columns = ['姓名','性别','世代','字辈','排行序号','排行称谓','出生日期','去世日期','出生地','去世地','现居住地','安葬地/墓址','安葬纬度','安葬经度','照片地址','配偶','父亲','母亲']
+    columns = ['姓名','性别','世代','字辈','排行序号','排行称谓','出生日期','去世日期','出生地','去世地','现居住地','安葬地/墓址','安葬纬度','安葬经度','照片地址','配偶','父亲','母亲','所属家族']
     sample_rows = [
         {
             '姓名': '张一世', '性别': '男', '世代': 1, '字辈': '德', '排行序号': 1, '排行称谓': '长子',
             '出生日期': '1900-01-01', '去世日期': '', '出生地': '祖籍地', '去世地': '', '现居住地': '',
-            '安葬地/墓址': '', '安葬纬度': '', '安葬经度': '', '照片地址': '', '配偶': '李氏', '父亲': '', '母亲': ''
+            '安葬地/墓址': '', '安葬纬度': '', '安葬经度': '', '照片地址': '', '配偶': '李氏', '父亲': '', '母亲': '', '所属家族': ''
         },
         {
             '姓名': '李氏', '性别': '女', '世代': 1, '字辈': '', '排行序号': '', '排行称谓': '',
             '出生日期': '', '去世日期': '', '出生地': '', '去世地': '', '现居住地': '',
-            '安葬地/墓址': '', '安葬纬度': '', '安葬经度': '', '照片地址': '', '配偶': '张一世', '父亲': '', '母亲': ''
+            '安葬地/墓址': '', '安葬纬度': '', '安葬经度': '', '照片地址': '', '配偶': '张一世', '父亲': '', '母亲': '', '所属家族': ''
         },
         {
             '姓名': '张二世', '性别': '男', '世代': 2, '字辈': '承', '排行序号': 1, '排行称谓': '长子',
             '出生日期': '1930-01-01', '去世日期': '', '出生地': '祖籍地', '去世地': '', '现居住地': '',
-            '安葬地/墓址': '', '安葬纬度': '', '安葬经度': '', '照片地址': '', '配偶': '', '父亲': '张一世', '母亲': '李氏'
+            '安葬地/墓址': '', '安葬纬度': '', '安葬经度': '', '照片地址': '', '配偶': '', '父亲': '张一世', '母亲': '李氏', '所属家族': ''
         },
     ]
     with pd.ExcelWriter(path, engine='openpyxl') as writer:
@@ -1883,9 +1931,10 @@ def ensure_import_template() -> Path:
             {'字段': '姓名', '说明': '必填；同名成员会影响父母/配偶匹配，建议保持唯一或后续手工校对'},
             {'字段': '性别', '说明': '建议填写：男 / 女'},
             {'字段': '世代', '说明': '数字，例如 1、2、3'},
-            {'字段': '配偶', '说明': '填写配偶姓名；多配偶用中文顿号“、”分隔'},
+            {'字段': '配偶', '说明': '填写配偶姓名；多配偶用中文顿号"、"分隔'},
             {'字段': '父亲/母亲', '说明': '填写表格中已有成员姓名，系统导入后自动建立关系'},
             {'字段': '安葬纬度/安葬经度', '说明': '可选；在编辑页通过地图选点后自动生成，也可手工填写'},
+            {'字段': '所属家族', '说明': '可选；填写家族名称（如"张氏宗族"）；为空时使用默认家族'},
         ]).to_excel(writer, index=False, sheet_name='填写说明')
     return path
 
