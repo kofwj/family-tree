@@ -294,7 +294,19 @@
 import { ref, computed, watch, nextTick, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import solarLunar from 'solarlunar'
+import L from 'leaflet'
+import 'leaflet/dist/leaflet.css'
 import { fetchAuthenticatedObjectUrl, revokeObjectUrl } from '../utils/authenticatedAsset'
+
+// Fix Leaflet marker icon asset path issue in Vite
+if (typeof window !== 'undefined') {
+  delete L.Icon.Default.prototype._getIconUrl
+  L.Icon.Default.mergeOptions({
+    iconRetinaUrl: 'https://cdn.bootcdn.net/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png',
+    iconUrl: 'https://cdn.bootcdn.net/ajax/libs/leaflet/1.9.4/images/marker-icon.png',
+    shadowUrl: 'https://cdn.bootcdn.net/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
+  })
+}
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -520,29 +532,6 @@ function hasWindow() {
   return typeof window !== 'undefined' && typeof document !== 'undefined'
 }
 
-function loadLeaflet() {
-  if (!hasWindow()) return Promise.reject(new Error('当前环境不支持地图'))
-  if (window.L) return Promise.resolve(window.L)
-  if (leafletPromise) return leafletPromise
-  leafletPromise = new Promise((resolve, reject) => {
-    const cssId = 'leaflet-css'
-    if (!document.getElementById(cssId)) {
-      const link = document.createElement('link')
-      link.id = cssId
-      link.rel = 'stylesheet'
-      link.href = 'https://cdn.bootcdn.net/ajax/libs/leaflet/1.9.4/leaflet.css'
-      document.head.appendChild(link)
-    }
-    const script = document.createElement('script')
-    script.src = 'https://cdn.bootcdn.net/ajax/libs/leaflet/1.9.4/leaflet.js'
-    script.async = true
-    script.onload = () => resolve(window.L)
-    script.onerror = () => reject(new Error('地图组件加载失败'))
-    document.body.appendChild(script)
-  })
-  return leafletPromise
-}
-
 function openBurialMapPicker() {
   mapSearchKeyword.value = form.value.burialPlace || ''
   mapSelectedAddress.value = form.value.burialPlace || ''
@@ -554,7 +543,6 @@ function openBurialMapPicker() {
 async function initBurialMap() {
   try {
     await nextTick()
-    const L = await loadLeaflet()
     const lat = Number(mapSelectedLat.value) || 32.33
     const lng = Number(mapSelectedLng.value) || 121.18
     if (leafletMap) {
@@ -582,8 +570,8 @@ async function initBurialMap() {
 }
 
 function setMarker(lat, lng) {
-  if (!leafletMap || !window.L) return
-  if (!leafletMarker) leafletMarker = window.L.marker([lat, lng]).addTo(leafletMap)
+  if (!leafletMap || !L) return
+  if (!leafletMarker) leafletMarker = L.marker([lat, lng]).addTo(leafletMap)
   else leafletMarker.setLatLng([lat, lng])
   leafletMap.setView([lat, lng], Math.max(leafletMap.getZoom(), 15))
 }

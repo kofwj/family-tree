@@ -16,6 +16,7 @@
     "axios": "^1.9.0",
     "dagre": "^0.8.5",
     "element-plus": "^2.11.4",
+    "leaflet": "^1.9.4",
     "solarlunar": "^3.1.0",
     "vue": "^3.5.18",
     "vue-router": "^4.4.5"
