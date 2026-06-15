@@ -1875,10 +1875,16 @@ def build_tree(session: Session, allowed_ids: Optional[set[int]] = None, visible
         return result
 
     def resolve_parent(member: Member) -> Optional[Member]:
-        if member.father_id and member.father_id in by_id:
-            return by_id[member.father_id]
-        if member.mother_id and member.mother_id in by_id:
-            return by_id[member.mother_id]
+        father = by_id.get(member.father_id) if member.father_id else None
+        mother = by_id.get(member.mother_id) if member.mother_id else None
+        if father and mother:
+            if getattr(mother, 'is_core_member', True) and not getattr(father, 'is_core_member', True):
+                return mother
+            return father
+        if father:
+            return father
+        if mother:
+            return mother
         return first_by_name(member.father_name) or first_by_name(member.mother_name)
 
     def parse_rank_title(title: Optional[str]) -> int:

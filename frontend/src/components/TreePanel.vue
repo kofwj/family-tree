@@ -171,7 +171,9 @@
               nodeProps.data.gender === '女' ? 'female' : 'male',
               Number(nodeProps.data.id) === Number(activeMemberId) ? 'active' : '',
               nodeProps.data.isMainLine ? 'is-main-line' : '',
-              nodeProps.data.isCollapsed ? 'is-collapsed' : ''
+              nodeProps.data.isCollapsed ? 'is-collapsed' : '',
+              nodeProps.data.matchesSearch === true ? 'matches-search' : '',
+              nodeProps.data.matchesSearch === false ? 'dimmed' : ''
             ]"
             :style="{ '--branch-color': nodeProps.data.branchColor || '#c59b6b' }"
           >
@@ -1605,13 +1607,15 @@ watch(readerItems, (items) => {
 }
 
 /* 关系图搜索高亮与灰度暗化样式 */
-.lineage-node-card.dimmed {
+.lineage-node-card.dimmed,
+.vue-flow__node.dimmed .lineage-node-card {
   opacity: 0.28;
   filter: grayscale(40%);
   transition: opacity 0.3s, filter 0.3s;
 }
 
-.lineage-node-card.matches-search {
+.lineage-node-card.matches-search,
+.vue-flow__node.matches-search .lineage-node-card {
   outline: 3px solid #d3a26a !important;
   outline-offset: 3px;
   box-shadow: 0 0 16px rgba(211, 162, 106, 0.6) !important;
