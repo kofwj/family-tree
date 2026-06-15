@@ -709,7 +709,7 @@ function memberName(memberId) {
 }
 
 function memberOptionLabel(member) {
-  const generation = member?.generation ? `${member.generation}世` : '未分世代'
+  const generation = (member?.generation !== null && member?.generation !== undefined) ? `${member.generation}世` : '未分世代'
   const branch = member?.branch ? ` · ${member.branch}` : ''
   return `${member?.name || '未命名成员'}（${generation}${branch}）`
 }
