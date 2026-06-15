@@ -257,11 +257,23 @@ const innerNodes = computed({
       nodes = nodes.filter(node => node.type !== 'group')
     }
     const keyword = normalizeText(searchKeyword.value).toLowerCase()
-    if (!keyword) return nodes
 
     return nodes.map(node => {
       if (node.type !== 'person') return node
       const data = node.data || {}
+      
+      if (!keyword) {
+        return {
+          ...node,
+          class: '',
+          zIndex: node.zIndex || (data.isMainLine ? 20 : 10),
+          data: {
+            ...data,
+            matchesSearch: undefined
+          }
+        }
+      }
+
       const searchHaystack = [
         data.name,
         data.branchLabel,
@@ -273,7 +285,8 @@ const innerNodes = computed({
       const matches = searchHaystack.includes(keyword)
       return {
         ...node,
-        class: `${node.class || ''} ${matches ? 'matches-search' : 'dimmed'}`.trim(),
+        class: matches ? 'matches-search' : 'dimmed',
+        zIndex: matches ? 30 : (node.zIndex || (data.isMainLine ? 20 : 10)),
         data: {
           ...data,
           matchesSearch: matches
@@ -284,7 +297,51 @@ const innerNodes = computed({
   set: () => {}
 })
 const innerEdges = computed({
-  get: () => props.edges,
+  get: () => {
+    const edges = props.edges || []
+    const keyword = normalizeText(searchKeyword.value).toLowerCase()
+    if (!keyword) {
+      return edges.map(edge => ({
+        ...edge,
+        style: {
+          ...edge.style,
+          opacity: undefined
+        }
+      }))
+    }
+
+    const matchIds = new Set()
+    for (const node of props.nodes || []) {
+      if (node.type !== 'person') continue
+      const data = node.data || {}
+      const searchHaystack = [
+        data.name,
+        data.branchLabel,
+        data.generationName,
+        data.spouse,
+        data.born,
+        data.died
+      ].filter(Boolean).join(' ').toLowerCase()
+      if (searchHaystack.includes(keyword)) {
+        matchIds.add(String(node.id))
+      }
+    }
+
+    return edges.map(edge => {
+      const sourceMatch = matchIds.has(String(edge.source))
+      const targetMatch = matchIds.has(String(edge.target))
+      const shouldDim = !sourceMatch || !targetMatch
+      return {
+        ...edge,
+        class: `${edge.class || ''} ${shouldDim ? 'dimmed-edge' : ''}`.trim(),
+        style: {
+          ...edge.style,
+          opacity: shouldDim ? 0.16 : 1,
+          transition: 'opacity 0.3s'
+        }
+      }
+    })
+  },
   set: () => {}
 })
 
