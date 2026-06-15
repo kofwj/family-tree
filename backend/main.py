@@ -1478,6 +1478,24 @@ def sync_member_spouse_links(session: Session, member_id: Optional[int], old_spo
         session.add(spouse)
 
 
+def sync_spouse_marriage_details(session: Session, member: Member):
+    if not member.id:
+        return
+    spouse_ids = parse_spouse_ids_value(member.spouse_ids)
+    for spouse_id in spouse_ids:
+        spouse = session.get(Member, spouse_id)
+        if spouse:
+            changed = False
+            if spouse.marriage_year != member.marriage_year:
+                spouse.marriage_year = member.marriage_year
+                changed = True
+            if spouse.marriage_note != member.marriage_note:
+                spouse.marriage_note = member.marriage_note
+                changed = True
+            if changed:
+                session.add(spouse)
+
+
 def member_has_ancestor(session: Session, member_id: int, ancestor_id: int, *, max_depth: int = 1000) -> bool:
     """Return whether ancestor_id is already in member_id's parent chain."""
     to_visit = [member_id]
@@ -2677,6 +2695,7 @@ def approve_review_request(request_id: int, reviewer: User = Depends(require_cap
         row.reviewer_user_id = reviewer.id
         row.reviewer_username = reviewer.username
         row.updated_at = datetime.now(timezone.utc).isoformat()
+        sync_spouse_marriage_details(session, member)
         session.add(member)
         session.add(row)
         write_audit_log(session, reviewer, 'review.approve', target_type='member', target_id=member.id, target_label=member.name, detail={'reviewRequestId': row.id, **classify_member_change_detail(changed)})
@@ -3103,6 +3122,7 @@ def create_member(payload: MemberCreate, user: User = Depends(require_capability
             session.add(link)
             
         sync_member_spouse_links(session, m.id, [], parse_spouse_ids_value(m.spouse_ids))
+        sync_spouse_marriage_details(session, m)
         write_audit_log(session, user, 'member.create', target_type='member', target_id=m.id, target_label=m.name, detail={'fatherName': m.father_name, 'motherName': m.mother_name, 'generation': m.generation})
         session.commit()
         all_members = session.exec(select(Member)).all()
@@ -3210,6 +3230,7 @@ def update_member(member_id: int, payload: MemberUpdate, user: User = Depends(re
         if review_request:
             audit_detail['pendingReviewId'] = review_request.id
         session.add(m)
+        sync_spouse_marriage_details(session, m)
         write_audit_log(session, user, 'member.update', target_type='member', target_id=m.id, target_label=m.name, detail=audit_detail)
         session.commit()
         session.refresh(m)

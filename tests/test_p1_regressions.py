@@ -109,3 +109,28 @@ def test_failed_restore_keeps_current_database_usable(app_module, monkeypatch):
         member = session.get(app_module.Member, existing["id"])
         assert member is not None
         assert member.name == "当前成员"
+
+
+def test_spouse_marriage_details_synchronization(client):
+    token = login(client)
+    
+    # 1. Create husband and wife, linking them as spouses
+    husband = create_member(client, token, name="张三", gender="男", generation=1)
+    wife = create_member(client, token, name="李四", gender="女", generation=1, spouse_ids=[husband["id"]])
+    
+    # Verify that spouse link is created on husband too
+    h_member = client.get(f"/members/{husband['id']}", headers=auth_headers(token)).json()
+    assert wife["id"] in h_member["spouseIds"]
+    
+    # 2. Update husband's marriage year and note
+    payload = {
+        "marriage_year": "1999",
+        "marriage_note": "原配",
+    }
+    client.put(f"/members/{husband['id']}", json=payload, headers=auth_headers(token))
+    
+    # Verify that wife's marriage details were updated automatically
+    w_member = client.get(f"/members/{wife['id']}", headers=auth_headers(token)).json()
+    assert w_member["marriageYear"] == "1999"
+    assert w_member["marriageNote"] == "原配"
+
