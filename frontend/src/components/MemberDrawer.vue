@@ -87,7 +87,7 @@
           <small>Genealogy</small>
         </div>
         <div class="archive-grid three">
-          <InfoItem label="世代" :value="member.generation ? `第${member.generation}代` : ''" highlight />
+          <InfoItem label="世代" :value="(member.generation !== null && member.generation !== undefined) ? `第${member.generation}代` : ''" highlight />
           <InfoItem label="字辈" :value="member.generationName" />
           <InfoItem label="排行" :value="member.rankTitle || rankText" />
           <InfoItem label="排行序号" :value="member.rankNo" />

@@ -111,7 +111,7 @@
           <div v-if="col.key === 'name'" class="member-name-cell">
             <strong>{{ row.name || '未命名' }}</strong>
             <span>
-              <el-tag v-if="row.generation" size="small" effect="plain">第{{ row.generation }}代</el-tag>
+              <el-tag v-if="row.generation !== null && row.generation !== undefined" size="small" effect="plain">第{{ row.generation }}代</el-tag>
               <el-tag v-if="row.rankTitle" size="small" type="warning" effect="plain">{{ row.rankTitle }}</el-tag>
               <el-tag v-if="row.branch" size="small" type="success" effect="plain">{{ row.branch }}</el-tag>
               <el-tag v-if="row.isCoreMember" size="small" type="danger" effect="plain">主线</el-tag>
@@ -120,7 +120,7 @@
           <el-tag v-else-if="col.key === 'gender'" :type="row.gender === '女' ? 'danger' : row.gender === '男' ? 'primary' : 'info'" effect="plain">
             {{ row.gender || '未知' }}
           </el-tag>
-          <span v-else-if="col.key === 'generation'">{{ row.generation ? `第${row.generation}代` : '—' }}</span>
+          <span v-else-if="col.key === 'generation'">{{ (row.generation !== null && row.generation !== undefined) ? `第${row.generation}代` : '—' }}</span>
           <span v-else-if="col.key === 'birthDate' || col.key === 'deathDate'">{{ formatDate(row[col.key]) }}</span>
           <el-tag v-else-if="col.key === 'isLiving'" :type="row.isLiving === false ? 'info' : 'success'" effect="plain">
             {{ row.isLiving === false ? '已故' : '健在' }}
@@ -151,7 +151,7 @@
           <h4>👤 {{ m.name }}</h4>
           <el-tag size="small" :type="m.gender === '女' ? 'danger' : 'primary'" effect="plain">{{ m.gender || '未知' }}</el-tag>
         </div>
-        <p>第{{ m.generation || '?' }}代 · {{ m.generationName || '字辈待补' }} · {{ m.rankTitle || '排行待补' }}</p>
+        <p>第{{ m.generation ?? '?' }}代 · {{ m.generationName || '字辈待补' }} · {{ m.rankTitle || '排行待补' }}</p>
         <p>{{ m.branch || '支系待补' }} · {{ m.occupation || m.positionTitle || '职业身份待补' }}</p>
         <p>{{ m.birthPlace || m.residence || m.ancestralOrigin || '籍贯待补充' }}</p>
         <div class="card-completion">
@@ -495,7 +495,7 @@ function resetFilters() {
   lowCompletenessThreshold.value = 60
 }
 
-const generations = computed(() => Array.from(new Set((props.members || []).map(m => m.generation).filter(Boolean))).sort((a, b) => a - b))
+const generations = computed(() => Array.from(new Set((props.members || []).map(m => m.generation).filter(g => g !== null && g !== undefined))).sort((a, b) => a - b))
 
 function matchesQualityFilter(member, filter) {
   switch (filter) {
@@ -539,7 +539,7 @@ const filteredMembers = computed(() => {
   const q = keyword.value.trim().toLowerCase()
   return (props.members || []).filter(m => {
     if (genderFilter.value && m.gender !== genderFilter.value) return false
-    if (generationFilter.value && Number(m.generation) !== Number(generationFilter.value)) return false
+    if (generationFilter.value !== null && generationFilter.value !== undefined && generationFilter.value !== '' && Number(m.generation) !== Number(generationFilter.value)) return false
     if (!matchesQualityFilter(m, qualityFilter.value)) return false
     if (!q) return true
     const haystack = [

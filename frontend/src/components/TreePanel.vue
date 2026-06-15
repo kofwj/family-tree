@@ -133,7 +133,7 @@
               <button v-for="person in focusParents" :key="person.id" class="focus-mini-card" type="button" @click="selectMember(person.id)">
                 <span>{{ relationLabel(person, 'parent') }}</span>
                 <b>{{ person.name }}</b>
-                <small>第{{ person.generation || '?' }}代 · {{ person.gender || '未知' }}</small>
+                <small>第{{ person.generation ?? '?' }}代 · {{ person.gender || '未知' }}</small>
               </button>
               <div v-if="!focusParents.length" class="focus-empty-card">未记录父母成员</div>
             </div>
@@ -144,7 +144,7 @@
             <div class="focus-current-card">
               <div class="focus-current-avatar" :class="focusMember.gender === '女' ? 'female' : 'male'">{{ focusMember.name?.slice(0, 1) || '人' }}</div>
               <div>
-                <span>第{{ focusMember.generation || '?' }}代</span>
+                <span>第{{ focusMember.generation ?? '?' }}代</span>
                 <h3>{{ focusMember.name }}</h3>
                 <p>{{ focusMember.birthDate || '生年不详' }}<template v-if="focusMember.deathDate"> - {{ focusMember.deathDate }}</template></p>
                 <div class="focus-chip-row">
@@ -162,7 +162,7 @@
               <button v-for="person in focusSpouses" :key="person.id || person.name" class="focus-mini-card" type="button" :disabled="!person.id" @click="person.id && selectMember(person.id)">
                 <span>配偶</span>
                 <b>{{ person.name }}</b>
-                <small>{{ person.id ? `第${person.generation || '?'}代 · ${person.gender || '未知'}` : '姓名记录，未建成员档案' }}</small>
+                <small>{{ person.id ? `第${person.generation ?? '?'}代 · ${person.gender || '未知'}` : '姓名记录，未建成员档案' }}</small>
               </button>
               <div v-if="!focusSpouses.length" class="focus-empty-card">未记录配偶</div>
             </div>
@@ -174,7 +174,7 @@
               <button v-for="person in focusChildren" :key="person.id" class="focus-mini-card" type="button" @click="selectMember(person.id)">
                 <span>子女</span>
                 <b>{{ person.name }}</b>
-                <small>第{{ person.generation || '?' }}代 · {{ person.gender || '未知' }}</small>
+                <small>第{{ person.generation ?? '?' }}代 · {{ person.gender || '未知' }}</small>
               </button>
               <div v-if="!focusChildren.length" class="focus-empty-card">暂未识别到子女成员</div>
             </div>
@@ -188,7 +188,7 @@
         <div v-if="summaryMember" class="summary-member-card">
           <div class="summary-avatar" :class="summaryMember.gender === '女' ? 'female' : 'male'">{{ summaryMember.name?.slice(0, 1) || '人' }}</div>
           <h3>{{ summaryMember.name }}</h3>
-          <p>第{{ summaryMember.generation || '?' }}代 · {{ summaryMember.gender || '未知' }}</p>
+          <p>第{{ summaryMember.generation ?? '?' }}代 · {{ summaryMember.gender || '未知' }}</p>
           <div class="summary-facts">
             <div><span>出生</span><b>{{ summaryMember.birthDate || summaryMember.birthDateText || '未记录' }}</b></div>
             <div><span>支系</span><b>{{ summaryMember.branch || '未分支' }}</b></div>
@@ -231,7 +231,7 @@
           >
             <div class="node-card__topline">
               <span class="node-gender-dot" :class="nodeProps.data.gender === '女' ? 'female' : 'male'"></span>
-              <span class="node-generation">第{{ nodeProps.data.generation || '?' }}代</span>
+              <span class="node-generation">第{{ nodeProps.data.generation ?? '?' }}代</span>
               <span v-if="nodeProps.data.branchLabel" class="node-branch-pill">{{ nodeProps.data.branchLabel }}</span>
               <span v-if="nodeProps.data.visibilityScope === 'basic'" class="node-branch-pill relation">关系可见</span>
             </div>
@@ -296,7 +296,7 @@ const innerEdges = computed({
 
 const modeLabel = computed(() => ({ reader: '族谱阅读', focus: '聚焦三代', flow: '全景关系图' }[displayMode.value] || '族谱阅读'))
 const memberCount = computed(() => (props.members || []).length || readerItems.value.length)
-const generationCount = computed(() => new Set((readerItems.value || []).map(item => item.generation).filter(Boolean)).size)
+const generationCount = computed(() => new Set((readerItems.value || []).map(item => item.generation).filter(g => g !== null && g !== undefined)).size)
 const currentFocusMemberId = computed(() => localFocusMemberId.value ?? props.activeMemberId)
 
 function nodeKey(node) {
@@ -329,8 +329,12 @@ function privacyLabel(level) {
 }
 
 function sortByGenealogy(a, b) {
-  return (Number(a?.generation || 999) - Number(b?.generation || 999))
-    || (Number(a?.rankNo || a?.rank_no || 999) - Number(b?.rankNo || b?.rank_no || 999))
+  const gA = a?.generation ?? a?.generationNo
+  const gB = b?.generation ?? b?.generationNo
+  const rA = a?.rankNo ?? a?.rank_no
+  const rB = b?.rankNo ?? b?.rank_no
+  return (Number(gA !== null && gA !== undefined ? gA : 999) - Number(gB !== null && gB !== undefined ? gB : 999))
+    || (Number(rA !== null && rA !== undefined ? rA : 999) - Number(rB !== null && rB !== undefined ? rB : 999))
     || String(a?.name || '').localeCompare(String(b?.name || ''), 'zh-Hans-CN')
 }
 
@@ -373,7 +377,8 @@ const readerItems = computed(() => {
   const roots = [...(props.tree || [])].sort(sortByGenealogy)
 
   function getGeneration(node, depth) {
-    return Number(node?.generation || node?.generationNo || depth || 1)
+    const gen = node?.generation ?? node?.generationNo;
+    return gen !== null && gen !== undefined ? Number(gen) : (depth || 1);
   }
 
   function getBranchInfo(node, topChild, rootIndex) {
@@ -467,7 +472,7 @@ const readerItems = computed(() => {
       parentId: parentItem ? String(parentItem.id) : null,
       name: member.name || '未命名成员',
       gender: member.gender,
-      generation: Number(member.generation || (parentItem?.generation ? Number(parentItem.generation) + 1 : 1)),
+      generation: member.generation !== null && member.generation !== undefined ? Number(member.generation) : (parentItem?.generation !== null && parentItem?.generation !== undefined ? Number(parentItem.generation) + 1 : 1),
       generationName: member.generationName,
       rankNo: member.rankNo,
       rankTitle: member.rankTitle,
@@ -575,7 +580,10 @@ const branchOptions = computed(() => {
   return [{ key: 'all', label: '全部分支', color: '#8b7154', count: readerItems.value.length }, ...branches]
 })
 
-const minGeneration = computed(() => Math.min(...readerItems.value.map(item => item.generation).filter(Boolean), 1))
+const minGeneration = computed(() => {
+  const gens = readerItems.value.map(item => item.generation).filter(g => g !== null && g !== undefined && !isNaN(g))
+  return gens.length ? Math.min(...gens) : 1
+})
 
 const childrenByParentId = computed(() => {
   const map = new Map()
