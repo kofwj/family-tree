@@ -666,10 +666,10 @@ HIGH_SENSITIVITY_ARCHIVE_FIELDS = {
 HIGH_SENSITIVITY_FIELDS = HIGH_SENSITIVITY_STRUCTURE_FIELDS | HIGH_SENSITIVITY_ARCHIVE_FIELDS
 
 def run_auto_organization(session: Session):
-    # Check if database has members and is not yet organized
-    link_count = len(session.exec(select(MemberFamilyLink)).all())
+    # Check if database has members and they are all still in a single family (or unassigned)
     members = session.exec(select(Member)).all()
-    if len(members) > 0 and link_count < 10:
+    distinct_families = {m.primary_family_id for m in members if m.primary_family_id is not None}
+    if len(members) > 0 and len(distinct_families) <= 1:
         # 1. Rename family 1 to 王氏家族
         unorganized_family = session.exec(select(FamilyGroup).where(FamilyGroup.id == 1)).first()
         if unorganized_family:
