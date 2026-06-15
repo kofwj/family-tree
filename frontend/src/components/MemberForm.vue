@@ -530,11 +530,11 @@ function loadLeaflet() {
       const link = document.createElement('link')
       link.id = cssId
       link.rel = 'stylesheet'
-      link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'
+      link.href = 'https://cdn.bootcdn.net/ajax/libs/leaflet/1.9.4/leaflet.css'
       document.head.appendChild(link)
     }
     const script = document.createElement('script')
-    script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'
+    script.src = 'https://cdn.bootcdn.net/ajax/libs/leaflet/1.9.4/leaflet.js'
     script.async = true
     script.onload = () => resolve(window.L)
     script.onerror = () => reject(new Error('地图组件加载失败'))
