@@ -297,6 +297,7 @@ import solarLunar from 'solarlunar'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { fetchAuthenticatedObjectUrl, revokeObjectUrl } from '../utils/authenticatedAsset'
+import api from '../api/client'
 
 // Fix Leaflet marker icon asset path issue in Vite
 if (typeof window !== 'undefined') {
@@ -578,11 +579,10 @@ function setMarker(lat, lng) {
 
 async function reverseGeocode(lat, lng) {
   try {
-    const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lng)}&accept-language=zh-CN`
-    const res = await fetch(url)
-    if (!res.ok) return ''
-    const data = await res.json()
-    return data?.display_name || ''
+    const res = await api.get('/map/reverse', {
+      params: { lat: String(lat), lon: String(lng) }
+    })
+    return res.data?.display_name || ''
   } catch {
     return ''
   }
@@ -600,10 +600,10 @@ async function searchBurialPlace() {
   if (!keyword) return
   mapSearching.value = true
   try {
-    const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${encodeURIComponent(keyword)}&accept-language=zh-CN`
-    const res = await fetch(url)
-    if (!res.ok) throw new Error('地图搜索失败')
-    const items = await res.json()
+    const res = await api.get('/map/search', {
+      params: { q: keyword, limit: 1 }
+    })
+    const items = res.data
     if (!items?.length) {
       ElMessage.warning('没有搜索到位置，可在地图上手动点击选择')
       return
@@ -611,7 +611,7 @@ async function searchBurialPlace() {
     const item = items[0]
     await setMapSelection(Number(item.lat), Number(item.lon), item.display_name || keyword)
   } catch (e) {
-    ElMessage.error(e.message || '地图搜索失败')
+    ElMessage.error(e.response?.data?.detail || e.message || '地图搜索失败')
   } finally {
     mapSearching.value = false
   }

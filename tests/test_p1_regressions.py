@@ -134,3 +134,38 @@ def test_spouse_marriage_details_synchronization(client):
     assert w_member["marriageYear"] == "1999"
     assert w_member["marriageNote"] == "原配"
 
+
+def test_map_proxy_endpoints(client, monkeypatch):
+    token = login(client)
+    
+    class MockResponse:
+        def __init__(self, data_bytes):
+            self.data_bytes = data_bytes
+        def read(self):
+            return self.data_bytes
+        def __enter__(self):
+            return self
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            pass
+
+    def mock_urlopen(req, timeout=None):
+        if "search" in req.full_url:
+            return MockResponse(b'[{"place_id":123,"lat":"1.0","lon":"2.0","display_name":"Mock Place"}]')
+        elif "reverse" in req.full_url:
+            return MockResponse(b'{"place_id":123,"lat":"1.0","lon":"2.0","display_name":"Mock Place"}')
+        raise ValueError("Unexpected url")
+
+    import urllib.request
+    monkeypatch.setattr(urllib.request, "urlopen", mock_urlopen)
+
+    # Test Search
+    res_search = client.get("/map/search?q=Beijing", headers=auth_headers(token))
+    assert res_search.status_code == 200
+    assert res_search.json()[0]["display_name"] == "Mock Place"
+
+    # Test Reverse
+    res_reverse = client.get("/map/reverse?lat=1.0&lon=2.0", headers=auth_headers(token))
+    assert res_reverse.status_code == 200
+    assert res_reverse.json()["display_name"] == "Mock Place"
+
+

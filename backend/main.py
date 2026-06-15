@@ -2848,6 +2848,38 @@ def export_gedcom(_: User = Depends(require_capability('export.gedcom'))):
 def health():
     return {'ok': True, 'time': datetime.now(timezone.utc).isoformat()}
 
+
+@app.get('/map/search')
+def map_search(q: str, limit: int = 10, user: User = Depends(get_current_user)):
+    import urllib.request
+    import urllib.error
+    encoded_q = quote(q)
+    url = f"https://nominatim.openstreetmap.org/search?format=jsonv2&limit={limit}&q={encoded_q}&accept-language=zh-CN"
+    try:
+        req = urllib.request.Request(url, headers={'User-Agent': 'FamilyTreeSystem/1.0'})
+        with urllib.request.urlopen(req, timeout=5) as response:
+            return json.loads(response.read().decode('utf-8'))
+    except urllib.error.URLError as e:
+        raise HTTPException(status_code=502, detail=f"无法从上游地图服务获取数据: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get('/map/reverse')
+def map_reverse(lat: str, lon: str, user: User = Depends(get_current_user)):
+    import urllib.request
+    import urllib.error
+    url = f"https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat={quote(lat)}&lon={quote(lon)}&accept-language=zh-CN"
+    try:
+        req = urllib.request.Request(url, headers={'User-Agent': 'FamilyTreeSystem/1.0'})
+        with urllib.request.urlopen(req, timeout=5) as response:
+            return json.loads(response.read().decode('utf-8'))
+    except urllib.error.URLError as e:
+        raise HTTPException(status_code=502, detail=f"无法从上游地图服务获取数据: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post('/auth/login', response_model=Token)
 def login(request: Request, form: OAuth2PasswordRequestForm = Depends()):
     check_login_rate_limit(request, form.username)
