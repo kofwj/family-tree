@@ -293,6 +293,7 @@
 <script setup>
 import { ref, computed, watch, nextTick, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus/es/components/message/index'
+import solarLunar from 'solarlunar'
 import { fetchAuthenticatedObjectUrl, revokeObjectUrl } from '../utils/authenticatedAsset'
 
 const props = defineProps({
@@ -420,16 +421,70 @@ function memberToForm(member) {
   }
 }
 
+const isInitializing = ref(false)
+
 watch(() => props.modelValue, (val) => {
   if (val) {
+    isInitializing.value = true
     rankTitleTouched.value = false
     selectedPhotoFile.value = null
     revokePhotoPreview()
     form.value = props.member?.id ? memberToForm(props.member) : defaultForm()
     if (!form.value.rankTitle && form.value.rankNo) maybeSyncRankTitle()
+    nextTick(() => {
+      isInitializing.value = false
+    })
   } else {
     selectedPhotoFile.value = null
     revokePhotoPreview()
+  }
+})
+
+// Watch birthDate to auto-convert to Lunar date
+watch(() => form.value.birthDate, (newVal) => {
+  if (isInitializing.value) return
+  if (newVal && typeof newVal === 'string') {
+    const match = newVal.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+    if (match) {
+      const y = parseInt(match[1], 10)
+      const m = parseInt(match[2], 10)
+      const d = parseInt(match[3], 10)
+      if (y >= 1900 && y <= 2100) {
+        try {
+          const lunar = solarLunar.solar2lunar(y, m, d)
+          if (lunar && lunar.gzYear) {
+            form.value.birthLunarDate = `农历${lunar.gzYear}年${lunar.IMonthCn}${lunar.IDayCn}`
+            form.value.birthIsLeapMonth = !!lunar.isLeap
+          }
+        } catch (e) {
+          console.error('[CalendarSync] Birth conversion error:', e)
+        }
+      }
+    }
+  }
+})
+
+// Watch deathDate to auto-convert to Lunar date
+watch(() => form.value.deathDate, (newVal) => {
+  if (isInitializing.value) return
+  if (newVal && typeof newVal === 'string') {
+    const match = newVal.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+    if (match) {
+      const y = parseInt(match[1], 10)
+      const m = parseInt(match[2], 10)
+      const d = parseInt(match[3], 10)
+      if (y >= 1900 && y <= 2100) {
+        try {
+          const lunar = solarLunar.solar2lunar(y, m, d)
+          if (lunar && lunar.gzYear) {
+            form.value.deathLunarDate = `农历${lunar.gzYear}年${lunar.IMonthCn}${lunar.IDayCn}`
+            form.value.deathIsLeapMonth = !!lunar.isLeap
+          }
+        } catch (e) {
+          console.error('[CalendarSync] Death conversion error:', e)
+        }
+      }
+    }
   }
 })
 
