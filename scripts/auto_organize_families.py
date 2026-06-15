@@ -3,8 +3,9 @@ import shutil
 import os
 from datetime import datetime
 
-DB_PATH = "/Users/jian/Downloads/family-tree-system/data/family.db"
-BACKUP_DIR = "/Users/jian/Downloads/family-tree-system/data/backups"
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DB_PATH = os.path.join(BASE_DIR, "data", "family.db")
+BACKUP_DIR = os.path.join(BASE_DIR, "data", "backups")
 
 def backup_db():
     if not os.path.exists(BACKUP_DIR):
