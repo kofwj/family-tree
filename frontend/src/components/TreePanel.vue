@@ -512,7 +512,50 @@ const readerItems = computed(() => {
     if (!changed) break
   }
 
-  return items.sort(sortByGenealogy)
+  // Lineage-based sorting to ensure perfect depth-first genealogical order
+  const memberMap = new Map()
+  for (const item of items) {
+    memberMap.set(item.id, item)
+  }
+  
+  function getLineagePath(itemId) {
+    const path = []
+    let currId = itemId
+    const visited = new Set()
+    while (currId && !visited.has(currId)) {
+      visited.add(currId)
+      path.unshift(currId)
+      const item = memberMap.get(currId)
+      currId = item?.parentId || null
+    }
+    return path
+  }
+  
+  const pathMap = new Map()
+  for (const item of items) {
+    pathMap.set(item.id, getLineagePath(item.id))
+  }
+  
+  function compareLineage(a, b) {
+    const pathA = pathMap.get(a.id) || []
+    const pathB = pathMap.get(b.id) || []
+    const minLen = Math.min(pathA.length, pathB.length)
+    for (let i = 0; i < minLen; i++) {
+      if (pathA[i] !== pathB[i]) {
+        const ancA = memberMap.get(pathA[i])
+        const ancB = memberMap.get(pathB[i])
+        const rA = ancA?.rankNo ?? ancA?.rank_no
+        const rB = ancB?.rankNo ?? ancB?.rank_no
+        const rankA = (rA !== null && rA !== undefined && rA !== '') ? Number(rA) : 999
+        const rankB = (rB !== null && rB !== undefined && rB !== '') ? Number(rB) : 999
+        if (rankA !== rankB) return rankA - rankB
+        return String(ancA?.name || '').localeCompare(String(ancB?.name || ''), 'zh-Hans-CN')
+      }
+    }
+    return pathA.length - pathB.length
+  }
+
+  return items.sort(compareLineage)
 })
 
 const branchOptions = computed(() => {
