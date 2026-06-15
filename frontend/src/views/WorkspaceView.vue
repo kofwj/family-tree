@@ -122,7 +122,13 @@
           />
         </el-tab-pane>
 
-        <el-tab-pane label="贰 · 成员录" name="members">
+        <el-tab-pane name="members">
+          <template #label>
+            <span style="display: flex; align-items: center; gap: 6px;">
+              <el-icon><Notebook /></el-icon>
+              <span>贰 · 成员录</span>
+            </span>
+          </template>
           <div style="margin-bottom:10px; display:flex; gap:10px; align-items:center">
             <el-button v-if="can('member.create')" type="primary" size="small" @click="openCreateForm">+ 新增成员</el-button>
             <el-tag type="info">当前角色：{{ currentUser.displayName }} / {{ roleLabel }}</el-tag>
@@ -228,6 +234,7 @@
       v-model="formVisible"
       :member="editingMember"
       :all-members="members"
+      :families="families"
       :saving="savingForm"
       :can-edit-core-relation="can('member.edit_core_relation')"
       @submit="onFormSubmit"
@@ -240,7 +247,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
-import { Refresh, Download, Upload, FolderOpened, Sunny, Moon, OfficeBuilding, View, User, DataAnalysis } from '@element-plus/icons-vue'
+import { Refresh, Download, Upload, FolderOpened, Sunny, Moon, OfficeBuilding, View, User, DataAnalysis, Notebook } from '@element-plus/icons-vue'
 import api from '../api/client'
 import TreePanel from '../components/TreePanel.vue'
 import MembersPanel from '../components/MembersPanel.vue'

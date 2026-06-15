@@ -61,6 +61,13 @@
         <el-row :gutter="16">
           <el-col :span="12"><el-form-item label="支系/房支"><el-input v-model="form.branch" placeholder="如：长房、二房、某某支" :disabled="!canEditCoreRelation" /></el-form-item></el-col>
           <el-col :span="6"><el-form-item label="本族主线"><el-switch v-model="form.isCoreMember" active-text="是" inactive-text="否" :disabled="!canEditCoreRelation" /></el-form-item></el-col>
+          <el-col :span="6">
+            <el-form-item label="所属家族">
+              <el-select v-model="form.primaryFamilyId" filterable clearable placeholder="选择家族" style="width:100%" :disabled="!canEditCoreRelation">
+                <el-option v-for="family in families" :key="family.id" :label="family.name" :value="family.id" />
+              </el-select>
+            </el-form-item>
+          </el-col>
         </el-row>
 
         <el-form-item label="配偶">
@@ -292,6 +299,7 @@ const props = defineProps({
   modelValue: { type: Boolean, default: false },
   member: { type: Object, default: null },
   allMembers: { type: Array, default: () => [] },
+  families: { type: Array, default: () => [] },
   saving: { type: Boolean, default: false },
   canEditCoreRelation: { type: Boolean, default: false },
 })

@@ -362,7 +362,7 @@ function isCoreLowCompleteness(member) {
 
 const defaultVisibleFields = [
   'name', 'gender', 'generation', 'generationName', 'rankTitle',
-  'branch', 'birthDate', 'birthPlace', 'residence', 'spouseIds', 'fatherId', 'motherId'
+  'branch', 'primaryFamilyId', 'birthDate', 'birthPlace', 'residence', 'spouseIds', 'fatherId', 'motherId'
 ]
 
 const columnMap = {
