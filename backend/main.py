@@ -3207,20 +3207,25 @@ def delete_member(member_id: int, user: User = Depends(require_capability('membe
 def get_families(user: User = Depends(require_capability('family.view'))):
     with Session(engine) as session:
         families = session.exec(select(FamilyGroup).where(FamilyGroup.is_active == True)).all()
-        return [{
-            'id': f.id,
-            'name': f.name,
-            'surname': f.surname,
-            'siteTitle': f.site_title,
-            'coverKicker': f.cover_kicker,
-            'subtitle': f.subtitle,
-            'description': f.description,
-            'rootMemberId': f.root_member_id,
-            'primaryLine': f.primary_line,
-            'isPrimary': f.is_primary,
-            'isActive': f.is_active,
-            'sortOrder': f.sort_order,
-        } for f in families]
+        result = []
+        for f in families:
+            member_count = len(session.exec(select(Member).where(Member.primary_family_id == f.id)).all())
+            result.append({
+                'id': f.id,
+                'name': f.name,
+                'surname': f.surname,
+                'siteTitle': f.site_title,
+                'coverKicker': f.cover_kicker,
+                'subtitle': f.subtitle,
+                'description': f.description,
+                'rootMemberId': f.root_member_id,
+                'primaryLine': f.primary_line,
+                'isPrimary': f.is_primary,
+                'isActive': f.is_active,
+                'sortOrder': f.sort_order,
+                'memberCount': member_count,
+            })
+        return result
 
 @app.get('/families/{family_id}')
 def get_family(family_id: int, user: User = Depends(require_capability('family.view'))):
