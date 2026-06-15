@@ -101,6 +101,7 @@
             :tree="tree"
             :members="members"
             :active-member-id="activeTreeMemberId"
+            :family-name="currentFamily?.name || currentFamily?.surname || '王氏家族'"
             @node-click="onFlowNodeClick"
             @toggle-branch="toggleTreeBranch"
             @expand-all="expandAllTreeBranches"
@@ -311,7 +312,63 @@ const flowEdges = ref([])
 
 const collapsedBranchIds = ref(new Set())
 const mainLineIds = ref(new Set())
-const branchPalette = ['#c59b6b', '#87a878', '#7f9dbd', '#b98389', '#b7a36a', '#8aa6a3', '#b48ead', '#9c8f7d']
+
+const FAMILY_HUE_PRESETS = {
+  '王': 32,   // Warm Amber / Bronze (王氏家族)
+  '孙': 210,  // Ocean Blue (孙氏家族)
+  '顾': 140,  // Jade Green (顾氏家族)
+  '曹': 280,  // Deep Violet / Purple (曹氏家族)
+  '周': 345,  // Rose Red (周氏家族)
+  '季': 45,   // Golden Yellow (季氏家族)
+  '成': 80,   // Olive / Sage Green (成氏家族)
+  '洪': 175,  // Muted Teal / Cyan (洪氏家族)
+  '张': 250,  // Indigo Blue (张氏家族)
+  '陈': 15    // Terracotta (陈氏家族)
+}
+
+function getFamilySurname(name) {
+  if (!name) return '王'
+  let s = String(name).replace(/(氏家族|氏宗族|氏族|宗族|家族|家谱)/g, '')
+  return s.charAt(0) || '王'
+}
+
+function getBaseHueForSurname(surname) {
+  const char = String(surname || '').charAt(0)
+  if (FAMILY_HUE_PRESETS[char] !== undefined) {
+    return FAMILY_HUE_PRESETS[char]
+  }
+  let hash = 0
+  for (let i = 0; i < char.length; i++) {
+    hash = char.charCodeAt(i) + ((hash << 5) - hash)
+  }
+  return Math.abs(hash) % 360
+}
+
+function generateFamilyPalette(baseHue) {
+  const palette = []
+  const variations = [
+    { hOff: -10, s: 65, l: 48 }, // 1. Base Darker Shade
+    { hOff: 10,  s: 55, l: 58 }, // 2. Lighter Analogous
+    { hOff: 0,   s: 70, l: 42 }, // 3. Vibrant Saturated
+    { hOff: -20, s: 50, l: 52 }, // 4. Muted Cool Shift
+    { hOff: 20,  s: 60, l: 62 }, // 5. Bright Warm Shift
+    { hOff: -5,  s: 45, l: 46 }, // 6. Muted Slate Shade
+    { hOff: 15,  s: 65, l: 50 }, // 7. Strong Analogous
+    { hOff: 5,   s: 50, l: 66 }  // 8. Soft Pastel
+  ]
+  for (const v of variations) {
+    const h = (baseHue + v.hOff + 360) % 360
+    palette.push(`hsl(${h}, ${v.s}%, ${v.l}%)`)
+  }
+  return palette
+}
+
+const branchPalette = computed(() => {
+  const name = currentFamily.value?.name || currentFamily.value?.surname || '王氏家族'
+  const surname = getFamilySurname(name)
+  const hue = getBaseHueForSurname(surname)
+  return generateFamilyPalette(hue)
+})
 
 function nodeKey(node) {
   return String(node?.id ?? node?.name ?? '')
@@ -344,9 +401,11 @@ function flattenTreeWithDagre(roots) {
   const generationMap = new Map()
   const branchFrames = new Map()
   const seen = new Set()
-  const branchIndexByRootChild = new Map()
+  const majorBranchIndexMap = new Map()
+  const subBranchIndexMap = new Map()
   const mainIds = computeMainLine(roots)
   mainLineIds.value = mainIds
+  const palette = branchPalette.value
 
   const normalizedRoots = [...(roots || [])]
     .sort((a, b) => (Number(a.generation || 999) - Number(b.generation || 999)) || String(a.name || '').localeCompare(String(b.name || ''), 'zh-Hans-CN'))
@@ -355,18 +414,68 @@ function flattenTreeWithDagre(roots) {
     return Number(node?.generation || node?.generationNo || depth || 1)
   }
 
-  function getBranchInfo(node, root, topChild, rootIndex) {
-    if (!topChild) {
-      return { label: '主源', index: rootIndex % branchPalette.length, color: branchPalette[rootIndex % branchPalette.length] }
+  function findFirstSplittingNode(node) {
+    let current = node
+    while (current) {
+      const children = current.children || []
+      if (children.length > 1) {
+        return current
+      } else if (children.length === 1) {
+        current = children[0]
+      } else {
+        return current
+      }
     }
-    const key = nodeKey(topChild)
-    if (!branchIndexByRootChild.has(key)) branchIndexByRootChild.set(key, branchIndexByRootChild.size)
-    const index = branchIndexByRootChild.get(key)
-    const label = topChild.branch || `${topChild.name || `${index + 1}房`}支`
-    return { label, index, color: branchPalette[index % branchPalette.length] }
+    return node
   }
 
-  function walk(node, parent, depth, root, topChild, rootIndex) {
+  function getBranchInfo(node, root, majorBranchNode, subBranchNode, rootIndex) {
+    if (!majorBranchNode) {
+      return { label: '主源', index: rootIndex % palette.length, color: palette[rootIndex % palette.length] }
+    }
+    const familySurname = getFamilySurname(currentFamily.value?.name || currentFamily.value?.surname || '王')
+    const familyBaseHue = getBaseHueForSurname(familySurname)
+    const majorKey = nodeKey(majorBranchNode)
+    if (!majorBranchIndexMap.has(majorKey)) {
+      majorBranchIndexMap.set(majorKey, majorBranchIndexMap.size)
+    }
+    const majorIndex = majorBranchIndexMap.get(majorKey)
+    const majorHue = (familyBaseHue + majorIndex * 50) % 360
+
+    if (!subBranchNode) {
+      const color = `hsl(${majorHue}, 65%, 48%)`
+      const label = majorBranchNode.branch || `${majorBranchNode.name || `${majorIndex + 1}房`}支`
+      return { label, index: majorIndex, color }
+    }
+
+    const subKey = nodeKey(subBranchNode)
+    if (!subBranchIndexMap.has(majorKey)) {
+      subBranchIndexMap.set(majorKey, new Map())
+    }
+    const subMap = subBranchIndexMap.get(majorKey)
+    if (!subMap.has(subKey)) {
+      subMap.set(subKey, subMap.size)
+    }
+    const subIndex = subMap.get(subKey)
+
+    const variations = [
+      { hOff: 0,   s: 65, l: 48 },
+      { hOff: 10,  s: 55, l: 58 },
+      { hOff: -10, s: 70, l: 42 },
+      { hOff: 20,  s: 50, l: 62 },
+      { hOff: -20, s: 60, l: 46 },
+      { hOff: 5,   s: 60, l: 52 },
+      { hOff: -5,  s: 68, l: 46 },
+      { hOff: 15,  s: 50, l: 64 }
+    ]
+    const v = variations[subIndex % variations.length]
+    const h = (majorHue + v.hOff + 360) % 360
+    const color = `hsl(${h}, ${v.s}%, ${v.l}%)`
+    const label = subBranchNode.branch || `${subBranchNode.name || `${subIndex + 1}房`}支`
+    return { label, index: subIndex, color }
+  }
+
+  function walk(node, parent, depth, root, majorBranchNode, subBranchNode, rootIndex, splitNodeId) {
     const id = nodeKey(node)
     if (!id || seen.has(id)) return
     seen.add(id)
@@ -376,7 +485,14 @@ function flattenTreeWithDagre(roots) {
       .sort((a, b) => (Number(a.rankNo || a.rank_no || 999) - Number(b.rankNo || b.rank_no || 999)) || String(a.name || '').localeCompare(String(b.name || ''), 'zh-Hans-CN'))
     const hasChildren = children.length > 0
     const isCollapsed = collapsedBranchIds.value.has(id)
-    const branchInfo = getBranchInfo(node, root, topChild, rootIndex)
+    let currentMajor = majorBranchNode
+    let currentSub = subBranchNode
+    if (!currentMajor && parent && nodeKey(parent) === splitNodeId) {
+      currentMajor = node
+    } else if (currentMajor && parent && nodeKey(parent) === nodeKey(currentMajor)) {
+      currentSub = node
+    }
+    const branchInfo = getBranchInfo(node, root, currentMajor, currentSub, rootIndex)
     const spouseNames = (node.spouses || []).map(s => s.name).filter(Boolean).join('、')
     const isMainLine = mainIds.has(id)
 
@@ -411,10 +527,13 @@ function flattenTreeWithDagre(roots) {
     }
 
     if (isCollapsed) return
-    children.forEach((child) => walk(child, node, generation + 1, root, topChild || child, rootIndex))
+    children.forEach((child) => walk(child, node, generation + 1, root, currentMajor, currentSub, rootIndex, splitNodeId))
   }
 
-  normalizedRoots.forEach((root, rootIndex) => walk(root, null, getGeneration(root, 1), root, null, rootIndex))
+  normalizedRoots.forEach((root, rootIndex) => {
+    const splitNode = findFirstSplittingNode(root)
+    walk(root, null, getGeneration(root, 1), root, null, null, rootIndex, nodeKey(splitNode))
+  })
 
   const generations = [...generationMap.keys()].sort((a, b) => a - b)
   const columnGap = 330
