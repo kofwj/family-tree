@@ -13,9 +13,6 @@
 
         <div class="workspace-topbar__meta">
           <div class="meta-card meta-card--primary" v-if="families.length > 0">
-            <div class="meta-card__icon">
-              <el-icon><OfficeBuilding /></el-icon>
-            </div>
             <div class="meta-card__content">
               <span class="meta-card__label">当前家族</span>
               <el-select 
@@ -38,9 +35,6 @@
           </div>
           
           <div class="meta-card">
-            <div class="meta-card__icon">
-              <el-icon><View /></el-icon>
-            </div>
             <div class="meta-card__content">
               <span class="meta-card__label">当前视图</span>
               <strong class="meta-card__value">{{ currentSectionLabel }}</strong>
@@ -48,9 +42,6 @@
           </div>
           
           <div class="meta-card">
-            <div class="meta-card__icon">
-              <el-icon><User /></el-icon>
-            </div>
             <div class="meta-card__content">
               <span class="meta-card__label">当前角色</span>
               <strong class="meta-card__value">{{ roleLabel }}</strong>
@@ -58,9 +49,6 @@
           </div>
           
           <div class="meta-card meta-card--stats">
-            <div class="meta-card__icon">
-              <el-icon><DataAnalysis /></el-icon>
-            </div>
             <div class="meta-card__content">
               <span class="meta-card__label">数据统计</span>
               <div class="meta-card__stats">
