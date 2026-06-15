@@ -730,7 +730,43 @@ body {
   width: min(340px, 100%);
   margin: 0 auto;
   display: grid;
-  gap: 10px;
+  gap: 12px;
+}
+
+.cover-actions .el-button {
+  height: 44px;
+  font-size: 15px;
+  font-weight: 500;
+  border-radius: 999px;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  margin: 0 !important;
+}
+
+.cover-actions .el-button--primary {
+  background-color: var(--primary) !important;
+  border-color: var(--primary) !important;
+  color: #fff !important;
+  box-shadow: 0 4px 12px rgba(139, 69, 19, 0.15);
+}
+
+.cover-actions .el-button--primary:hover {
+  background-color: var(--primary-light) !important;
+  border-color: var(--primary-light) !important;
+  transform: translateY(-1.5px);
+  box-shadow: 0 6px 16px rgba(139, 69, 19, 0.25);
+}
+
+.cover-actions .el-button.is-plain {
+  border: 1px solid var(--border) !important;
+  color: var(--text-main) !important;
+  background-color: transparent !important;
+}
+
+.cover-actions .el-button.is-plain:hover {
+  background-color: color-mix(in srgb, var(--primary) 6%, transparent) !important;
+  border-color: var(--primary) !important;
+  color: var(--primary) !important;
+  transform: translateY(-1.5px);
 }
 
 @media (max-width: 900px) {
