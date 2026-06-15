@@ -2535,6 +2535,25 @@ def approve_review_request(request_id: int, reviewer: User = Depends(require_cap
         member.updated_at = datetime.now(timezone.utc).isoformat()
         if 'spouse_ids' in data:
             sync_member_spouse_links(session, member.id, old_spouse_ids, parse_spouse_ids_value(member.spouse_ids))
+        if 'primary_family_id' in data:
+            new_fam_id = data['primary_family_id']
+            old_fam_id = before.get('primary_family_id')
+            if old_fam_id != new_fam_id:
+                if old_fam_id:
+                    old_links = session.exec(select(MemberFamilyLink).where(
+                        MemberFamilyLink.member_id == member.id,
+                        MemberFamilyLink.family_id == old_fam_id
+                    )).all()
+                    for l in old_links:
+                        session.delete(l)
+                if new_fam_id:
+                    existing = session.exec(select(MemberFamilyLink).where(
+                        MemberFamilyLink.member_id == member.id,
+                        MemberFamilyLink.family_id == new_fam_id
+                    )).first()
+                    if not existing:
+                        link = MemberFamilyLink(member_id=member.id, family_id=new_fam_id)
+                        session.add(link)
         after = {key: getattr(member, key, None) for key in data.keys()}
         changed = {key: {'before': before.get(key), 'after': after.get(key)} for key in data.keys() if before.get(key) != after.get(key)}
         row.status = 'approved'
@@ -2927,9 +2946,30 @@ def create_member(payload: MemberCreate, user: User = Depends(require_capability
         
         # Set primary_family_id if not provided
         if 'primary_family_id' not in data or data['primary_family_id'] is None:
-            primary_family = session.exec(select(FamilyGroup).where(FamilyGroup.is_primary == True)).first()
-            if primary_family:
-                data['primary_family_id'] = primary_family.id
+            father_id = data.get('father_id')
+            mother_id = data.get('mother_id')
+            spouse_ids = parse_spouse_ids_value(data.get('spouse_ids'))
+            
+            inherited_family_id = None
+            if father_id:
+                father = session.get(Member, father_id)
+                if father and father.primary_family_id:
+                    inherited_family_id = father.primary_family_id
+            if not inherited_family_id and mother_id:
+                mother = session.get(Member, mother_id)
+                if mother and mother.primary_family_id:
+                    inherited_family_id = mother.primary_family_id
+            if not inherited_family_id and spouse_ids:
+                first_spouse = session.get(Member, spouse_ids[0])
+                if first_spouse and first_spouse.primary_family_id:
+                    inherited_family_id = first_spouse.primary_family_id
+                    
+            if inherited_family_id:
+                data['primary_family_id'] = inherited_family_id
+            else:
+                primary_family = session.exec(select(FamilyGroup).where(FamilyGroup.is_primary == True)).first()
+                if primary_family:
+                    data['primary_family_id'] = primary_family.id
         
         family_id = data.get('primary_family_id')
         if family_id and not can_edit_family(session, user, family_id):
@@ -3024,6 +3064,25 @@ def update_member(member_id: int, payload: MemberUpdate, user: User = Depends(re
         m.updated_at = datetime.now(timezone.utc).isoformat()
         if 'spouse_ids' in data:
             sync_member_spouse_links(session, m.id, old_spouse_ids, parse_spouse_ids_value(m.spouse_ids))
+        if 'primary_family_id' in data:
+            new_fam_id = data['primary_family_id']
+            old_fam_id = before.get('primary_family_id')
+            if old_fam_id != new_fam_id:
+                if old_fam_id:
+                    old_links = session.exec(select(MemberFamilyLink).where(
+                        MemberFamilyLink.member_id == m.id,
+                        MemberFamilyLink.family_id == old_fam_id
+                    )).all()
+                    for l in old_links:
+                        session.delete(l)
+                if new_fam_id:
+                    existing = session.exec(select(MemberFamilyLink).where(
+                        MemberFamilyLink.member_id == m.id,
+                        MemberFamilyLink.family_id == new_fam_id
+                    )).first()
+                    if not existing:
+                        link = MemberFamilyLink(member_id=m.id, family_id=new_fam_id)
+                        session.add(link)
         after = {key: getattr(m, key, None) for key in data.keys()}
         changed = {
             key: {'before': before.get(key), 'after': after.get(key)}
@@ -3252,8 +3311,20 @@ def get_family_tree(family_id: int, user: User = Depends(require_capability('tre
         visibility = build_member_visibility(session, user)
         default_visible_fields = resolve_visible_member_fields(session, user)
         
-        # Filter members by primary_family_id
-        all_members = session.exec(select(Member).where(Member.primary_family_id == family_id)).all()
+        # Filter members by primary_family_id or family link
+        linked_member_ids = session.exec(
+            select(MemberFamilyLink.member_id).where(MemberFamilyLink.family_id == family_id)
+        ).all()
+        if linked_member_ids:
+            all_members = session.exec(
+                select(Member).where(
+                    (Member.primary_family_id == family_id) | (Member.id.in_(linked_member_ids))
+                )
+            ).all()
+        else:
+            all_members = session.exec(
+                select(Member).where(Member.primary_family_id == family_id)
+            ).all()
         
         if visibility is None:
             visible_ids = {m.id for m in all_members if m.id is not None}

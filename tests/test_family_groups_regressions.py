@@ -1,6 +1,6 @@
 import json
 
-from backend.main import FamilyGroup, Member, SiteSetting
+from backend.main import FamilyGroup, Member, SiteSetting, MemberFamilyLink
 from tests.helpers import auth_headers, create_member, login
 
 
@@ -60,3 +60,54 @@ def test_person_ancestry_endpoint_exists(app_module, client):
     assert data['member']['id'] == child['id']
     assert 'paternal' in data['lines']
     assert 'maternal' in data['lines']
+
+
+def test_family_tree_includes_linked_members(app_module, client):
+    token = login(client)
+    with app_module.Session(app_module.engine) as session:
+        extra_family = FamilyGroup(name='林氏家族', surname='林', site_title='林氏家谱', cover_kicker='LIN CLAN', subtitle='林氏支系', is_primary=False)
+        session.add(extra_family)
+        session.commit()
+        session.refresh(extra_family)
+        extra_family_id = extra_family.id
+        
+        linked_member = Member(name='林林', primary_family_id=1)
+        session.add(linked_member)
+        session.commit()
+        session.refresh(linked_member)
+        linked_member_id = linked_member.id
+        
+        link = MemberFamilyLink(member_id=linked_member.id, family_id=extra_family.id, relation_type='secondary')
+        session.add(link)
+        session.commit()
+        
+    response = client.get(f"/families/{extra_family_id}/tree", headers=auth_headers(token))
+    assert response.status_code == 200, response.text
+    tree = response.json()
+    member_ids = {node['id'] for node in tree['nodes']}
+    assert linked_member_id in member_ids
+
+
+def test_member_inherits_parent_family(app_module, client):
+    token = login(client)
+    with app_module.Session(app_module.engine) as session:
+        extra_family = FamilyGroup(name='林氏家族', surname='林', site_title='林氏家谱', cover_kicker='LIN CLAN', subtitle='林氏支系', is_primary=False)
+        session.add(extra_family)
+        session.commit()
+        session.refresh(extra_family)
+        extra_family_id = extra_family.id
+        
+        parent = Member(name='林林爸爸', primary_family_id=extra_family_id, gender='男')
+        session.add(parent)
+        session.commit()
+        session.refresh(parent)
+        parent_id = parent.id
+        
+    response = client.post('/members', json={
+        'name': '林小林',
+        'gender': '男',
+        'father_id': parent_id
+    }, headers=auth_headers(token))
+    assert response.status_code == 200, response.text
+    child = response.json()
+    assert child['primaryFamilyId'] == extra_family_id
