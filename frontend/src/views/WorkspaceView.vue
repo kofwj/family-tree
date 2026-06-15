@@ -347,14 +347,14 @@ function getBaseHueForSurname(surname) {
 function generateFamilyPalette(baseHue) {
   const palette = []
   const variations = [
-    { hOff: -10, s: 65, l: 48 }, // 1. Base Darker Shade
-    { hOff: 10,  s: 55, l: 58 }, // 2. Lighter Analogous
-    { hOff: 0,   s: 70, l: 42 }, // 3. Vibrant Saturated
-    { hOff: -20, s: 50, l: 52 }, // 4. Muted Cool Shift
-    { hOff: 20,  s: 60, l: 62 }, // 5. Bright Warm Shift
-    { hOff: -5,  s: 45, l: 46 }, // 6. Muted Slate Shade
-    { hOff: 15,  s: 65, l: 50 }, // 7. Strong Analogous
-    { hOff: 5,   s: 50, l: 66 }  // 8. Soft Pastel
+    { hOff: 0,   s: 36, l: 48 }, // 1. Muted Base
+    { hOff: 8,   s: 30, l: 56 }, // 2. Lighter Analogous
+    { hOff: -8,  s: 42, l: 42 }, // 3. Deeper Muted
+    { hOff: 15,  s: 26, l: 62 }, // 4. Soft Pastel
+    { hOff: -15, s: 32, l: 46 }, // 5. Slate Muted
+    { hOff: 4,   s: 34, l: 52 }, // 6. Gentle Medium
+    { hOff: -4,  s: 38, l: 44 }, // 7. Richer Analogous
+    { hOff: 12,  s: 28, l: 60 }  // 8. Softest Light
   ]
   for (const v of variations) {
     const h = (baseHue + v.hOff + 360) % 360
@@ -402,7 +402,6 @@ function flattenTreeWithDagre(roots) {
   const branchFrames = new Map()
   const seen = new Set()
   const majorBranchIndexMap = new Map()
-  const subBranchIndexMap = new Map()
   const mainIds = computeMainLine(roots)
   mainLineIds.value = mainIds
   const palette = branchPalette.value
@@ -410,72 +409,33 @@ function flattenTreeWithDagre(roots) {
   const normalizedRoots = [...(roots || [])]
     .sort((a, b) => (Number(a.generation || 999) - Number(b.generation || 999)) || String(a.name || '').localeCompare(String(b.name || ''), 'zh-Hans-CN'))
 
+  const rootsMinGen = normalizedRoots.length ? Math.min(...normalizedRoots.map(root => {
+    const gen = root?.generation ?? root?.generationNo;
+    return gen !== null && gen !== undefined ? Number(gen) : 1;
+  })) : 1
+  const branchGen = rootsMinGen <= 1 ? 2 : rootsMinGen + 1
+
   function getGeneration(node, depth) {
     return Number(node?.generation || node?.generationNo || depth || 1)
   }
 
-  function findFirstSplittingNode(node) {
-    let current = node
-    while (current) {
-      const children = current.children || []
-      if (children.length > 1) {
-        return current
-      } else if (children.length === 1) {
-        current = children[0]
-      } else {
-        return current
-      }
-    }
-    return node
-  }
-
-  function getBranchInfo(node, root, majorBranchNode, subBranchNode, rootIndex) {
-    if (!majorBranchNode) {
-      return { label: '主源', index: rootIndex % palette.length, color: palette[rootIndex % palette.length] }
-    }
+  function getBranchInfo(node, root, branchNode, rootIndex) {
     const familySurname = getFamilySurname(currentFamily.value?.name || currentFamily.value?.surname || '王')
     const familyBaseHue = getBaseHueForSurname(familySurname)
-    const majorKey = nodeKey(majorBranchNode)
-    if (!majorBranchIndexMap.has(majorKey)) {
-      majorBranchIndexMap.set(majorKey, majorBranchIndexMap.size)
+    if (!branchNode) {
+      return { label: '主源', index: rootIndex % palette.length, color: `hsl(${familyBaseHue}, 16%, 60%)` }
     }
-    const majorIndex = majorBranchIndexMap.get(majorKey)
-    const majorHue = (familyBaseHue + majorIndex * 50) % 360
-
-    if (!subBranchNode) {
-      const color = `hsl(${majorHue}, 65%, 48%)`
-      const label = majorBranchNode.branch || `${majorBranchNode.name || `${majorIndex + 1}房`}支`
-      return { label, index: majorIndex, color }
+    const key = nodeKey(branchNode)
+    if (!majorBranchIndexMap.has(key)) {
+      majorBranchIndexMap.set(key, majorBranchIndexMap.size)
     }
-
-    const subKey = nodeKey(subBranchNode)
-    if (!subBranchIndexMap.has(majorKey)) {
-      subBranchIndexMap.set(majorKey, new Map())
-    }
-    const subMap = subBranchIndexMap.get(majorKey)
-    if (!subMap.has(subKey)) {
-      subMap.set(subKey, subMap.size)
-    }
-    const subIndex = subMap.get(subKey)
-
-    const variations = [
-      { hOff: 0,   s: 65, l: 48 },
-      { hOff: 10,  s: 55, l: 58 },
-      { hOff: -10, s: 70, l: 42 },
-      { hOff: 20,  s: 50, l: 62 },
-      { hOff: -20, s: 60, l: 46 },
-      { hOff: 5,   s: 60, l: 52 },
-      { hOff: -5,  s: 68, l: 46 },
-      { hOff: 15,  s: 50, l: 64 }
-    ]
-    const v = variations[subIndex % variations.length]
-    const h = (majorHue + v.hOff + 360) % 360
-    const color = `hsl(${h}, ${v.s}%, ${v.l}%)`
-    const label = subBranchNode.branch || `${subBranchNode.name || `${subIndex + 1}房`}支`
-    return { label, index: subIndex, color }
+    const index = majorBranchIndexMap.get(key)
+    const color = palette[index % palette.length]
+    const label = branchNode.branch || `${branchNode.name || `${index + 1}房`}支`
+    return { label, index, color }
   }
 
-  function walk(node, parent, depth, root, majorBranchNode, subBranchNode, rootIndex, splitNodeId) {
+  function walk(node, parent, depth, root, branchNode, rootIndex, branchGen) {
     const id = nodeKey(node)
     if (!id || seen.has(id)) return
     seen.add(id)
@@ -485,14 +445,12 @@ function flattenTreeWithDagre(roots) {
       .sort((a, b) => (Number(a.rankNo || a.rank_no || 999) - Number(b.rankNo || b.rank_no || 999)) || String(a.name || '').localeCompare(String(b.name || ''), 'zh-Hans-CN'))
     const hasChildren = children.length > 0
     const isCollapsed = collapsedBranchIds.value.has(id)
-    let currentMajor = majorBranchNode
-    let currentSub = subBranchNode
-    if (!currentMajor && parent && nodeKey(parent) === splitNodeId) {
-      currentMajor = node
-    } else if (currentMajor && parent && nodeKey(parent) === nodeKey(currentMajor)) {
-      currentSub = node
+    
+    let currentBranchNode = branchNode
+    if (generation === branchGen) {
+      currentBranchNode = node
     }
-    const branchInfo = getBranchInfo(node, root, currentMajor, currentSub, rootIndex)
+    const branchInfo = getBranchInfo(node, root, currentBranchNode, rootIndex)
     const spouseNames = (node.spouses || []).map(s => s.name).filter(Boolean).join('、')
     const isMainLine = mainIds.has(id)
 
@@ -527,12 +485,11 @@ function flattenTreeWithDagre(roots) {
     }
 
     if (isCollapsed) return
-    children.forEach((child) => walk(child, node, generation + 1, root, currentMajor, currentSub, rootIndex, splitNodeId))
+    children.forEach((child) => walk(child, node, generation + 1, root, currentBranchNode, rootIndex, branchGen))
   }
 
   normalizedRoots.forEach((root, rootIndex) => {
-    const splitNode = findFirstSplittingNode(root)
-    walk(root, null, getGeneration(root, 1), root, null, null, rootIndex, nodeKey(splitNode))
+    walk(root, null, getGeneration(root, 1), root, null, rootIndex, branchGen)
   })
 
   const generations = [...generationMap.keys()].sort((a, b) => a - b)

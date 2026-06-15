@@ -319,14 +319,14 @@ function getBaseHueForSurname(surname) {
 function generateFamilyPalette(baseHue) {
   const palette = []
   const variations = [
-    { hOff: -10, s: 65, l: 48 }, // 1. Base Darker Shade
-    { hOff: 10,  s: 55, l: 58 }, // 2. Lighter Analogous
-    { hOff: 0,   s: 70, l: 42 }, // 3. Vibrant Saturated
-    { hOff: -20, s: 50, l: 52 }, // 4. Muted Cool Shift
-    { hOff: 20,  s: 60, l: 62 }, // 5. Bright Warm Shift
-    { hOff: -5,  s: 45, l: 46 }, // 6. Muted Slate Shade
-    { hOff: 15,  s: 65, l: 50 }, // 7. Strong Analogous
-    { hOff: 5,   s: 50, l: 66 }  // 8. Soft Pastel
+    { hOff: 0,   s: 36, l: 48 }, // 1. Muted Base
+    { hOff: 8,   s: 30, l: 56 }, // 2. Lighter Analogous
+    { hOff: -8,  s: 42, l: 42 }, // 3. Deeper Muted
+    { hOff: 15,  s: 26, l: 62 }, // 4. Soft Pastel
+    { hOff: -15, s: 32, l: 46 }, // 5. Slate Muted
+    { hOff: 4,   s: 34, l: 52 }, // 6. Gentle Medium
+    { hOff: -4,  s: 38, l: 44 }, // 7. Richer Analogous
+    { hOff: 12,  s: 28, l: 60 }  // 8. Softest Light
   ]
   for (const v of variations) {
     const h = (baseHue + v.hOff + 360) % 360
@@ -430,88 +430,46 @@ const readerItems = computed(() => {
   const seen = new Set()
   const mainIds = computeMainLineIds(props.tree || [])
   const majorBranchIndexMap = new Map()
-  const subBranchIndexMap = new Map()
   const roots = [...(props.tree || [])].sort(sortByGenealogy)
   const palette = branchPalette.value
+
+  const rootsMinGen = roots.length ? Math.min(...roots.map(root => {
+    const gen = root?.generation ?? root?.generationNo;
+    return gen !== null && gen !== undefined ? Number(gen) : 1;
+  })) : 1
+  const branchGen = rootsMinGen <= 1 ? 2 : rootsMinGen + 1
 
   function getGeneration(node, depth) {
     const gen = node?.generation ?? node?.generationNo;
     return gen !== null && gen !== undefined ? Number(gen) : (depth || 1);
   }
 
-  function findFirstSplittingNode(node) {
-    let current = node
-    while (current) {
-      const children = current.children || []
-      if (children.length > 1) {
-        return current
-      } else if (children.length === 1) {
-        current = children[0]
-      } else {
-        return current
-      }
-    }
-    return node
-  }
-
-  function getBranchInfo(node, majorBranchNode, subBranchNode, rootIndex) {
-    if (!majorBranchNode) {
-      return { key: 'main', label: '主源', index: rootIndex % palette.length, color: palette[rootIndex % palette.length] }
-    }
+  function getBranchInfo(node, branchNode, rootIndex) {
     const familySurname = getFamilySurname(props.familyName)
     const familyBaseHue = getBaseHueForSurname(familySurname)
-    const majorKey = nodeKey(majorBranchNode)
-    if (!majorBranchIndexMap.has(majorKey)) {
-      majorBranchIndexMap.set(majorKey, majorBranchIndexMap.size)
+    if (!branchNode) {
+      return { key: 'main', label: '主源', index: rootIndex, color: `hsl(${familyBaseHue}, 16%, 60%)` }
     }
-    const majorIndex = majorBranchIndexMap.get(majorKey)
-    const majorHue = (familyBaseHue + majorIndex * 50) % 360
-
-    if (!subBranchNode) {
-      const color = `hsl(${majorHue}, 65%, 48%)`
-      const label = majorBranchNode.branch || `${majorBranchNode.name || `${majorIndex + 1}房`}支`
-      return { key: `major-${majorKey}`, label, index: majorIndex, color }
+    const key = nodeKey(branchNode)
+    if (!majorBranchIndexMap.has(key)) {
+      majorBranchIndexMap.set(key, majorBranchIndexMap.size)
     }
-
-    const subKey = nodeKey(subBranchNode)
-    if (!subBranchIndexMap.has(majorKey)) {
-      subBranchIndexMap.set(majorKey, new Map())
-    }
-    const subMap = subBranchIndexMap.get(majorKey)
-    if (!subMap.has(subKey)) {
-      subMap.set(subKey, subMap.size)
-    }
-    const subIndex = subMap.get(subKey)
-
-    const variations = [
-      { hOff: 0,   s: 65, l: 48 },
-      { hOff: 10,  s: 55, l: 58 },
-      { hOff: -10, s: 70, l: 42 },
-      { hOff: 20,  s: 50, l: 62 },
-      { hOff: -20, s: 60, l: 46 },
-      { hOff: 5,   s: 60, l: 52 },
-      { hOff: -5,  s: 68, l: 46 },
-      { hOff: 15,  s: 50, l: 64 }
-    ]
-    const v = variations[subIndex % variations.length]
-    const h = (majorHue + v.hOff + 360) % 360
-    const color = `hsl(${h}, ${v.s}%, ${v.l}%)`
-    const label = subBranchNode.branch || `${subBranchNode.name || `${subIndex + 1}房`}支`
-    return { key: `branch-${subKey}`, label, index: subIndex, color }
+    const index = majorBranchIndexMap.get(key)
+    const color = palette[index % palette.length]
+    const label = branchNode.branch || `${branchNode.name || `${index + 1}房`}支`
+    return { key: `branch-${key}`, label, index, color }
   }
 
-  function walk(node, parent, depth, majorBranchNode, subBranchNode, rootIndex, splitNodeId) {
+  function walk(node, parent, depth, branchNode, rootIndex, branchGen) {
     const id = nodeKey(node)
     if (!id || seen.has(id)) return
     seen.add(id)
-    let currentMajor = majorBranchNode
-    let currentSub = subBranchNode
-    if (!currentMajor && parent && nodeKey(parent) === splitNodeId) {
-      currentMajor = node
-    } else if (currentMajor && parent && nodeKey(parent) === nodeKey(currentMajor)) {
-      currentSub = node
+    const gen = getGeneration(node, depth)
+    let currentBranchNode = branchNode
+    if (gen === branchGen) {
+      currentBranchNode = node
     }
-    const branchInfo = getBranchInfo(node, currentMajor, currentSub, rootIndex)
+    const branchInfo = getBranchInfo(node, currentBranchNode, rootIndex)
     const children = [...(node.children || [])].sort(sortByGenealogy)
     const relationChildren = relationChildrenOf(id)
     const relationDescendants = relationDescendantCount(id)
@@ -523,7 +481,7 @@ const readerItems = computed(() => {
       parentId: parent ? nodeKey(parent) : null,
       name: node.name || '未命名成员',
       gender: node.gender,
-      generation: getGeneration(node, depth),
+      generation: gen,
       generationName: node.generationName,
       rankNo: node.rankNo,
       rankTitle: node.rankTitle,
@@ -545,12 +503,11 @@ const readerItems = computed(() => {
       searchHaystack,
       matchesSearch: false,
     })
-    children.forEach(child => walk(child, node, getGeneration(node, depth) + 1, currentMajor, currentSub, rootIndex, splitNodeId))
+    children.forEach(child => walk(child, node, gen + 1, currentBranchNode, rootIndex, branchGen))
   }
 
   roots.forEach((root, rootIndex) => {
-    const splitNode = findFirstSplittingNode(root)
-    walk(root, null, getGeneration(root, 1), null, null, rootIndex, nodeKey(splitNode))
+    walk(root, null, getGeneration(root, 1), null, rootIndex, branchGen)
   })
 
   const itemById = new Map()
