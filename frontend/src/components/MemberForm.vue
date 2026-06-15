@@ -362,6 +362,8 @@ const defaultForm = () => ({
   isLiving: true, spouseIds: [], fatherId: null, motherId: null, childrenNote: '', marriageYear: '', marriageNote: '',
   education: '', occupation: '', positionTitle: '', biography: '', source: '', isPublic: true,
   primaryFamilyId: null,
+  privacyLevel: 'public',
+  photoUrl: '',
 })
 
 const form = ref(defaultForm())
