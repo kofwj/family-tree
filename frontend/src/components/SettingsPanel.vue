@@ -570,8 +570,8 @@ const availableUsers = computed(() => props.users.filter(u => u.isActive))
 
 const activeGovernanceTab = ref('overview')
 const memberOptions = computed(() => [...(props.members || [])].sort((a, b) => {
-  const ga = Number(a?.generation || 0)
-  const gb = Number(b?.generation || 0)
+  const ga = (a?.generation !== null && a?.generation !== undefined) ? Number(a.generation) : 999
+  const gb = (b?.generation !== null && b?.generation !== undefined) ? Number(b.generation) : 999
   if (ga !== gb) return ga - gb
   return String(a?.name || '').localeCompare(String(b?.name || ''), 'zh-Hans-CN')
 }))
