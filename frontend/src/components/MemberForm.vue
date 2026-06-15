@@ -63,7 +63,7 @@
           <el-col :span="6"><el-form-item label="本族主线"><el-switch v-model="form.isCoreMember" active-text="是" inactive-text="否" :disabled="!canEditCoreRelation" /></el-form-item></el-col>
           <el-col :span="6">
             <el-form-item label="所属家族">
-              <el-select v-model="form.primaryFamilyId" filterable clearable placeholder="选择家族" style="width:100%" :disabled="!canEditCoreRelation">
+              <el-select v-model="form.primaryFamilyId" filterable clearable placeholder="选择家族" style="width:100%" :disabled="!canEditCoreRelation && isEdit">
                 <el-option v-for="family in families" :key="family.id" :label="family.name" :value="family.id" />
               </el-select>
             </el-form-item>
@@ -71,7 +71,7 @@
         </el-row>
 
         <el-form-item label="配偶">
-          <el-select v-model="form.spouseIds" filterable multiple clearable placeholder="选择配偶（支持多选）" style="width:100%" :disabled="!canEditCoreRelation">
+          <el-select v-model="form.spouseIds" filterable multiple clearable placeholder="选择配偶（支持多选）" style="width:100%" :disabled="!canEditCoreRelation && isEdit">
             <el-option v-for="m in relationOptions" :key="m.id" :label="`${m.name}（#${m.id} · 第${m.generation || '?'}代）`" :value="m.id" />
           </el-select>
         </el-form-item>
@@ -79,14 +79,14 @@
         <el-row :gutter="16">
           <el-col :span="12">
             <el-form-item label="父亲">
-              <el-select v-model="form.fatherId" filterable clearable placeholder="选择父亲" style="width:100%" :disabled="!canEditCoreRelation">
+              <el-select v-model="form.fatherId" filterable clearable placeholder="选择父亲" style="width:100%" :disabled="!canEditCoreRelation && isEdit">
                 <el-option v-for="m in relationOptions" :key="m.id" :label="`${m.name}（#${m.id} · 第${m.generation || '?'}代）`" :value="m.id" />
               </el-select>
             </el-form-item>
           </el-col>
           <el-col :span="12">
             <el-form-item label="母亲">
-              <el-select v-model="form.motherId" filterable clearable placeholder="选择母亲" style="width:100%" :disabled="!canEditCoreRelation">
+              <el-select v-model="form.motherId" filterable clearable placeholder="选择母亲" style="width:100%" :disabled="!canEditCoreRelation && isEdit">
                 <el-option v-for="m in relationOptions" :key="m.id" :label="`${m.name}（#${m.id} · 第${m.generation || '?'}代）`" :value="m.id" />
               </el-select>
             </el-form-item>

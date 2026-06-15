@@ -628,7 +628,8 @@ IDENTITY_CORE_FIELDS = {
 
 STRUCTURE_CORE_FIELDS = {
     'generation', 'generation_name', 'rank_no', 'rank_title', 'branch', 'is_core_member',
-    'spouse_name', 'spouse_ids', 'father_name', 'father_id', 'mother_name', 'mother_id'
+    'spouse_name', 'spouse_ids', 'father_name', 'father_id', 'mother_name', 'mother_id',
+    'primary_family_id'
 }
 
 ARCHIVE_PROFILE_FIELDS = {
@@ -1282,7 +1283,7 @@ def filter_member_payload_for_user(user: User, payload: BaseModel, *, for_create
         # Editors may attach a newly created member to their accessible branch,
         # but must not be able to modify existing core relationships by sending
         # crafted update requests.
-        creation_structure_bridge_fields = {'father_id', 'mother_id', 'spouse_ids'} if for_create and 'member.create' in caps else set()
+        creation_structure_bridge_fields = {'father_id', 'mother_id', 'spouse_ids', 'primary_family_id'} if for_create and 'member.create' in caps else set()
         allowed = PROFILE_FIELDS | creation_structure_bridge_fields
     else:
         allowed = set()
@@ -1798,6 +1799,36 @@ def ensure_member_can_be_deleted(session: Session, member_id: int):
         raise HTTPException(status_code=409, detail=f'该成员仍绑定用户「{bound_user.username}」，请先解除绑定')
 
 
+def pick_best_parent(candidates: list[Member], child_generation: Optional[int]) -> Optional[Member]:
+    if not candidates:
+        return None
+    if len(candidates) == 1:
+        return candidates[0]
+    if child_generation is None:
+        return candidates[0]
+    valid_cands = [c for c in candidates if c.generation is not None and c.generation < child_generation]
+    if valid_cands:
+        # Sort by distance to (child_generation - 1)
+        valid_cands.sort(key=lambda c: abs(c.generation - (child_generation - 1)))
+        return valid_cands[0]
+    return candidates[0]
+
+
+def pick_best_spouse(candidates: list[Member], member_generation: Optional[int], exclude_id: Optional[int] = None) -> Optional[Member]:
+    valid_cands = [c for c in candidates if c.id != exclude_id] if exclude_id else candidates
+    if not valid_cands:
+        return None
+    if len(valid_cands) == 1:
+        return valid_cands[0]
+    if member_generation is None:
+        return valid_cands[0]
+    cands_with_gen = [c for c in valid_cands if c.generation is not None]
+    if cands_with_gen:
+        cands_with_gen.sort(key=lambda c: abs(c.generation - member_generation))
+        return cands_with_gen[0]
+    return valid_cands[0]
+
+
 def import_excel(path: str, replace=True) -> int:
     df = pd.read_excel(path, sheet_name=0)
     required = ['姓名','性别','世代','字辈','排行序号','排行称谓','出生日期','去世日期','出生地','去世地','现居住地','配偶','父亲','母亲']
@@ -1867,9 +1898,28 @@ def import_excel(path: str, replace=True) -> int:
                     by_name.setdefault(nm, []).append(m)
 
             for m in members:
-                father = (by_name.get(normalize_name_value(m.father_name)) or [None])[0] if normalize_name_value(m.father_name) else None
-                mother = (by_name.get(normalize_name_value(m.mother_name)) or [None])[0] if normalize_name_value(m.mother_name) else None
-                spouse_members = [x for sp_name in split_relation_names(m.spouse_name) for x in (by_name.get(sp_name) or [])]
+                family_id = m.primary_family_id
+                
+                # 同家族过滤以及世代差启发式匹配父亲
+                father = None
+                if normalize_name_value(m.father_name):
+                    cands = [x for x in by_name.get(normalize_name_value(m.father_name), []) if x.primary_family_id == family_id]
+                    father = pick_best_parent(cands, m.generation)
+                
+                # 同家族过滤以及世代差启发式匹配母亲
+                mother = None
+                if normalize_name_value(m.mother_name):
+                    cands = [x for x in by_name.get(normalize_name_value(m.mother_name), []) if x.primary_family_id == family_id]
+                    mother = pick_best_parent(cands, m.generation)
+                
+                # 同家族过滤以及世代差启发式匹配配偶
+                spouse_members = []
+                for sp_name in split_relation_names(m.spouse_name):
+                    cands = [x for x in by_name.get(sp_name, []) if x.primary_family_id == family_id]
+                    best_sp = pick_best_spouse(cands, m.generation, exclude_id=m.id)
+                    if best_sp:
+                        spouse_members.append(best_sp)
+                        
                 uniq_spouse_ids = []
                 for sp in spouse_members:
                     if sp.id and sp.id != m.id and sp.id not in uniq_spouse_ids:
@@ -2003,7 +2053,7 @@ def build_tree(session: Session, allowed_ids: Optional[set[int]] = None, visible
             return by_id[member.mother_id]
         return first_by_name(member.father_name) or first_by_name(member.mother_name)
 
-    def parse_rank_title(title: str | None) -> int:
+    def parse_rank_title(title: Optional[str]) -> int:
         if not title:
             return 999
         t = str(title).strip()
@@ -2453,6 +2503,31 @@ def approve_review_request(request_id: int, reviewer: User = Depends(require_cap
         if not member:
             raise HTTPException(404, '成员不存在')
         data = json.loads(row.payload_json or '{}')
+        
+        # 验证新提交的关系是否合法或形成循环
+        if 'father_id' in data:
+            father_id = data['father_id']
+            if father_id:
+                father = session.get(Member, father_id)
+                if not father:
+                    raise HTTPException(400, f'所指父亲成员 #{father_id} 不存在')
+                validate_parent_assignment(session, member.id, father, '父亲')
+        if 'mother_id' in data:
+            mother_id = data['mother_id']
+            if mother_id:
+                mother = session.get(Member, mother_id)
+                if not mother:
+                    raise HTTPException(400, f'所指母亲成员 #{mother_id} 不存在')
+                validate_parent_assignment(session, member.id, mother, '母亲')
+        if 'spouse_ids' in data:
+            spouse_ids = parse_spouse_ids_value(data['spouse_ids'])
+            for sid in spouse_ids:
+                if sid == member.id:
+                    raise HTTPException(400, '配偶不能指向自己')
+                spouse = session.get(Member, sid)
+                if not spouse:
+                    raise HTTPException(400, f'所指配偶成员 #{sid} 不存在')
+
         old_spouse_ids = parse_spouse_ids_value(member.spouse_ids)
         before = {key: getattr(member, key, None) for key in data.keys()}
         for k, v in data.items():
@@ -2856,10 +2931,20 @@ def create_member(payload: MemberCreate, user: User = Depends(require_capability
             if primary_family:
                 data['primary_family_id'] = primary_family.id
         
+        family_id = data.get('primary_family_id')
+        if family_id and not can_edit_family(session, user, family_id):
+            raise HTTPException(status_code=403, detail='当前账号无权在此家族中创建成员')
+        
         m = Member(**data)
         session.add(m)
         session.commit()
         session.refresh(m)
+        
+        # 建立多家族关联记录，保持数据同步
+        if m.id and m.primary_family_id:
+            link = MemberFamilyLink(member_id=m.id, family_id=m.primary_family_id)
+            session.add(link)
+            
         sync_member_spouse_links(session, m.id, [], parse_spouse_ids_value(m.spouse_ids))
         write_audit_log(session, user, 'member.create', target_type='member', target_id=m.id, target_label=m.name, detail={'fatherName': m.father_name, 'motherName': m.mother_name, 'generation': m.generation})
         session.commit()
@@ -2873,9 +2958,12 @@ def get_member_photo(filename: str, user: User = Depends(require_capability('mem
         raise HTTPException(404, '照片不存在')
     expected_path = f'/api/member-photos/{filename}'
     with Session(engine) as session:
-        member = session.exec(select(Member).where(Member.photo_path == expected_path)).first()
-        if not member:
-            member = session.exec(select(Member).where(Member.photo_path == f'/member-photos/{filename}')).first()
+        member = session.exec(select(Member).where(
+            (Member.photo_path == expected_path) |
+            (Member.photo_path == f'/member-photos/{filename}') |
+            (Member.photo_path == filename) |
+            (Member.photo_path.like(f'%/{filename}'))
+        )).first()
         if not member or not can_view_member_with_visibility(user, member, build_member_visibility(session, user)):
             raise HTTPException(status_code=403, detail='当前账号无权访问该成员照片')
     media_type = detect_image_mime(target.read_bytes()[:512]) or 'application/octet-stream'
@@ -2911,6 +2999,13 @@ def update_member(member_id: int, payload: MemberUpdate, user: User = Depends(re
     with Session(engine) as session:
         m = session.get(Member, member_id)
         require_member_in_full_scope(session, user, m)
+        if m.primary_family_id and not can_edit_family(session, user, m.primary_family_id):
+            raise HTTPException(status_code=403, detail='当前账号无权编辑此成员所属家族的资料')
+        if 'primary_family_id' in data:
+            new_family_id = data['primary_family_id']
+            if new_family_id and new_family_id != m.primary_family_id:
+                if not can_edit_family(session, user, new_family_id):
+                    raise HTTPException(status_code=403, detail='当前账号无权将成员转移到该家族')
         review_request = None
         if requested_structure and 'member.edit_core_relation' not in get_user_capabilities(user):
             review_request = create_member_review_request_if_changed(session, user, m, requested_structure)
@@ -2956,6 +3051,12 @@ def delete_member(member_id: int, user: User = Depends(require_capability('membe
         require_member_in_full_scope(session, user, m)
         ensure_member_can_be_deleted(session, member_id)
         sync_member_spouse_links(session, m.id, parse_spouse_ids_value(m.spouse_ids), [])
+        
+        # 清理多家族关联表中的关联记录，避免脏数据残留
+        links = session.exec(select(MemberFamilyLink).where(MemberFamilyLink.member_id == member_id)).all()
+        for link in links:
+            session.delete(link)
+            
         write_audit_log(session, user, 'member.delete', target_type='member', target_id=m.id, target_label=m.name, detail={'generation': m.generation, 'fatherName': m.father_name, 'motherName': m.mother_name})
         session.delete(m)
         session.commit()
