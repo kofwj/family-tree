@@ -359,7 +359,7 @@ function flattenTreeWithDagre(roots) {
   const palette = branchPalette.value
 
   const normalizedRoots = [...(roots || [])]
-    .sort((a, b) => (Number(a.generation || 999) - Number(b.generation || 999)) || String(a.name || '').localeCompare(String(b.name || ''), 'zh-Hans-CN'))
+    .sort((a, b) => (Number(a.generation ?? 999) - Number(b.generation ?? 999)) || String(a.name || '').localeCompare(String(b.name || ''), 'zh-Hans-CN'))
 
   const rootsMinGen = normalizedRoots.length ? Math.min(...normalizedRoots.map(root => {
     const gen = root?.generation ?? root?.generationNo;
@@ -368,7 +368,8 @@ function flattenTreeWithDagre(roots) {
   const branchGen = rootsMinGen <= 1 ? 2 : rootsMinGen + 1
 
   function getGeneration(node, depth) {
-    return Number(node?.generation || node?.generationNo || depth || 1)
+    const gen = node?.generation ?? node?.generationNo ?? depth ?? 1
+    return Number(gen)
   }
 
   function getBranchInfo(node, root, branchNode, rootIndex) {
@@ -575,11 +576,11 @@ function expandTreeToGeneration(generation) {
   const next = new Set()
   function walk(node, depth = 1) {
     if (!node) return
-    const gen = Number(node.generation || node.generationNo || depth)
+    const gen = Number(node.generation ?? node.generationNo ?? depth)
     if (gen >= generation && (node.children || []).length) next.add(nodeKey(node))
     ;(node.children || []).forEach(child => walk(child, gen + 1))
   }
-  ;(tree.value || []).forEach(root => walk(root, Number(root.generation || root.generationNo || 1)))
+  ;(tree.value || []).forEach(root => walk(root, Number(root.generation ?? root.generationNo ?? 1)))
   collapsedBranchIds.value = next
   rebuildFlow()
 }
