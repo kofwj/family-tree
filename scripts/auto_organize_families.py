@@ -3,9 +3,22 @@ import shutil
 import os
 from datetime import datetime
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_PATH = os.path.join(BASE_DIR, "data", "family.db")
-BACKUP_DIR = os.path.join(BASE_DIR, "data", "backups")
+db_url = os.environ.get("DATABASE_URL")
+if db_url and db_url.startswith("sqlite:///"):
+    db_path = db_url.replace("sqlite:///", "")
+    if db_path.startswith("/"):
+        DB_PATH = db_path
+    else:
+        DB_PATH = os.path.abspath(db_path)
+else:
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    if os.path.basename(script_dir) == "scripts":
+        BASE_DIR = os.path.dirname(script_dir)
+    else:
+        BASE_DIR = script_dir
+    DB_PATH = os.path.join(BASE_DIR, "data", "family.db")
+
+BACKUP_DIR = os.path.join(os.path.dirname(DB_PATH), "backups")
 
 def backup_db():
     if not os.path.exists(BACKUP_DIR):
