@@ -96,20 +96,11 @@
       <el-tabs v-model="tab" class="main-tabs">
         <el-tab-pane label="壹 · 家族世系" name="tree">
           <TreePanel
-            :nodes="flowNodes"
-            :edges="flowEdges"
             :tree="tree"
             :members="members"
             :active-member-id="activeTreeMemberId"
             :family-name="currentFamily?.name || currentFamily?.surname || '王氏家族'"
-            :layout-orientation="layoutOrientation"
-            @update:layout-orientation="changeLayoutOrientation"
             @node-click="onFlowNodeClick"
-            @toggle-branch="toggleTreeBranch"
-            @expand-all="expandAllTreeBranches"
-            @collapse-main-line="collapseTreeToMainLine"
-            @expand-generation="expandTreeToGeneration"
-            @reset-view="rebuildFlow"
           />
         </el-tab-pane>
 
@@ -244,7 +235,6 @@ import ArchivePanel from '../components/ArchivePanel.vue'
 import MemberDrawer from '../components/MemberDrawer.vue'
 import MemberForm from '../components/MemberForm.vue'
 import SettingsPanel from '../components/SettingsPanel.vue'
-import { FAMILY_HUE_PRESETS, getFamilySurname, getBaseHueForSurname, generateFamilyPalette } from '../utils/genealogy'
 
 const router = useRouter()
 const members = ref([])
@@ -310,21 +300,6 @@ const generationCount = computed(() => {
   return set.size
 })
 
-const flowNodes = ref([])
-const flowEdges = ref([])
-const layoutOrientation = ref('vertical')
-
-const collapsedBranchIds = ref(new Set())
-const mainLineIds = ref(new Set())
-
-
-const branchPalette = computed(() => {
-  const name = currentFamily.value?.name || currentFamily.value?.surname || '王氏家族'
-  const surname = getFamilySurname(name)
-  const hue = getBaseHueForSurname(surname)
-  return generateFamilyPalette(hue)
-})
-
 function nodeKey(node) {
   return String(node?.id ?? node?.name ?? '')
 }
@@ -349,268 +324,15 @@ function computeMainLine(roots) {
   for (const root of (roots || [])) walk(root)
   return ids
 }
-
-function flattenTreeWithDagre(roots) {
-  const visibleNodes = []
-  const visibleEdges = []
-  const generationMap = new Map()
-  const branchFrames = new Map()
-  const seen = new Set()
-  const majorBranchIndexMap = new Map()
-  const mainIds = computeMainLine(roots)
-  mainLineIds.value = mainIds
-  const palette = branchPalette.value
-
-  const normalizedRoots = [...(roots || [])]
-    .sort((a, b) => (Number(a.generation ?? 999) - Number(b.generation ?? 999)) || String(a.name || '').localeCompare(String(b.name || ''), 'zh-Hans-CN'))
-
-  const rootsMinGen = normalizedRoots.length ? Math.min(...normalizedRoots.map(root => {
-    const gen = root?.generation ?? root?.generationNo;
-    return gen !== null && gen !== undefined ? Number(gen) : 1;
-  })) : 1
-  const branchGen = rootsMinGen <= 1 ? 2 : rootsMinGen + 1
-
-  function getGeneration(node, depth) {
-    const gen = node?.generation ?? node?.generationNo ?? depth ?? 1
-    return Number(gen)
-  }
-
-  function getBranchInfo(node, root, branchNode, rootIndex) {
-    const familySurname = getFamilySurname(currentFamily.value?.name || currentFamily.value?.surname || '王')
-    const familyBaseHue = getBaseHueForSurname(familySurname)
-    if (!branchNode) {
-      return { label: '主源', index: rootIndex % palette.length, color: `hsl(${familyBaseHue}, 16%, 60%)` }
-    }
-    const key = nodeKey(branchNode)
-    if (!majorBranchIndexMap.has(key)) {
-      majorBranchIndexMap.set(key, majorBranchIndexMap.size)
-    }
-    const index = majorBranchIndexMap.get(key)
-    const color = palette[index % palette.length]
-    const label = branchNode.branch || `${branchNode.name || `${index + 1}房`}支`
-    return { label, index, color }
-  }
-
-  function walk(node, parent, depth, root, branchNode, rootIndex, branchGen) {
-    const id = nodeKey(node)
-    if (!id || seen.has(id)) return
-    seen.add(id)
-
-    const generation = getGeneration(node, depth)
-    const children = [...(node.children || [])]
-      .sort((a, b) => (Number(a.rankNo || a.rank_no || 999) - Number(b.rankNo || b.rank_no || 999)) || String(a.name || '').localeCompare(String(b.name || ''), 'zh-Hans-CN'))
-    const hasChildren = children.length > 0
-    const isCollapsed = collapsedBranchIds.value.has(id)
-    
-    let currentBranchNode = branchNode
-    if (generation === branchGen) {
-      currentBranchNode = node
-    }
-    const branchInfo = getBranchInfo(node, root, currentBranchNode, rootIndex)
-    const spouseNames = (node.spouses || []).map(s => s.name).filter(Boolean).join('、')
-    const isMainLine = mainIds.has(id)
-
-    if (!generationMap.has(generation)) generationMap.set(generation, [])
-    generationMap.get(generation).push({
-      node,
-      id,
-      parentId: parent ? nodeKey(parent) : null,
-      generation,
-      branchInfo,
-      isMainLine,
-      hasChildren,
-      childCount: children.length,
-      descendantCount: descendantCount(node),
-      isCollapsed,
-      spouseNames,
-    })
-
-    if (parent) {
-      visibleEdges.push({
-        id: `e-${nodeKey(parent)}-${id}`,
-        source: nodeKey(parent),
-        target: id,
-        type: 'smoothstep',
-        animated: false,
-        style: {
-          stroke: isMainLine && mainIds.has(nodeKey(parent)) ? '#6d3f1f' : branchInfo.color,
-          strokeWidth: isMainLine && mainIds.has(nodeKey(parent)) ? 4.2 : 2.25,
-        },
-        class: isMainLine && mainIds.has(nodeKey(parent)) ? 'lineage-edge-main' : 'lineage-edge-branch',
-      })
-    }
-
-    if (isCollapsed) return
-    children.forEach((child) => walk(child, node, generation + 1, root, currentBranchNode, rootIndex, branchGen))
-  }
-
-  normalizedRoots.forEach((root, rootIndex) => {
-    walk(root, null, getGeneration(root, 1), root, null, rootIndex, branchGen)
-  })
-
-  const generations = [...generationMap.keys()].sort((a, b) => a - b)
-  const isVertical = layoutOrientation.value === 'vertical'
-  const columnGap = isVertical ? 280 : 330
-  const rowGap = isVertical ? 260 : 178
-  const branchGroupGap = isVertical ? 80 : 92
-  const nodeW = 220
-  const nodeH = 128
-  const startX = 90
-  const startY = 82
-
-  const branchCountsByGeneration = new Map()
-  for (const generation of generations) {
-    const branchIndices = new Set((generationMap.get(generation) || []).map(item => item.branchInfo.index))
-    branchCountsByGeneration.set(generation, branchIndices.size)
-  }
-
-  const ordered = []
-  for (const generation of generations) {
-    const rows = generationMap.get(generation) || []
-    rows.sort((a, b) => {
-      if (a.branchInfo.index !== b.branchInfo.index) return a.branchInfo.index - b.branchInfo.index
-      if (a.isMainLine !== b.isMainLine) return a.isMainLine ? -1 : 1
-      return String(a.node.name || '').localeCompare(String(b.node.name || ''), 'zh-Hans-CN')
-    })
-    let previousBranchIndex = null
-    let branchOffset = 0
-    rows.forEach((item, rowIndex) => {
-      if (previousBranchIndex !== null && item.branchInfo.index !== previousBranchIndex) {
-        branchOffset += branchGroupGap
-      }
-      previousBranchIndex = item.branchInfo.index
-      const generationBranchCount = branchCountsByGeneration.get(generation) || 1
-      
-      let x, y
-      if (isVertical) {
-        y = startY + (generation - generations[0]) * rowGap
-        x = startX + rowIndex * columnGap + branchOffset + (generationBranchCount > 1 ? item.branchInfo.index * 10 : 0)
-      } else {
-        x = startX + (generation - generations[0]) * columnGap
-        y = startY + rowIndex * rowGap + branchOffset + (generationBranchCount > 1 ? item.branchInfo.index * 10 : 0)
-      }
-
-      ordered.push({ ...item, x, y })
-      const frame = branchFrames.get(item.branchInfo.label) || { color: item.branchInfo.color, minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity, label: item.branchInfo.label }
-      frame.minX = Math.min(frame.minX, x - 28)
-      frame.maxX = Math.max(frame.maxX, x + nodeW + 28)
-      frame.minY = Math.min(frame.minY, y - 26)
-      frame.maxY = Math.max(frame.maxY, y + nodeH + 26)
-      branchFrames.set(item.branchInfo.label, frame)
-    })
-  }
-
-  for (const frame of branchFrames.values()) {
-    if (frame.label === '主源' || !Number.isFinite(frame.minX)) continue
-    visibleNodes.push({
-      id: `branch-frame-${frame.label}`,
-      type: 'group',
-      position: { x: frame.minX, y: frame.minY },
-      style: {
-        width: `${Math.max(240, frame.maxX - frame.minX)}px`,
-        height: `${Math.max(140, frame.maxY - frame.minY)}px`,
-        backgroundColor: `${frame.color}18`,
-        border: `1px solid ${frame.color}55`,
-        borderRadius: '24px',
-        zIndex: -10,
-      },
-      data: { label: frame.label },
-      draggable: false,
-      selectable: false,
-    })
-  }
-
-  for (const item of ordered) {
-    visibleNodes.push({
-      id: item.id,
-      type: 'person',
-      position: { x: item.x, y: item.y },
-      data: {
-        id: item.node?.id,
-        name: item.node?.name || item.id,
-        gender: item.node?.gender,
-        generation: item.generation,
-        generationName: item.node?.generationName || undefined,
-        born: item.node?.birthDate,
-        died: item.node?.deathDate,
-        spouse: item.spouseNames || undefined,
-        branchLabel: item.branchInfo.label === '主源' ? '' : item.branchInfo.label,
-        branchColor: item.branchInfo.color,
-        isMainLine: item.isMainLine,
-        hasChildren: item.hasChildren,
-        childCount: item.childCount,
-        descendantCount: item.descendantCount,
-        isCollapsed: item.isCollapsed,
-        visibilityScope: item.node?.visibilityScope || 'full',
-        visibilityLabel: item.node?.visibilityLabel || '',
-      },
-      draggable: true,
-      zIndex: item.isMainLine ? 20 : 10,
-    })
-  }
-
-  return { nodes: visibleNodes, edges: visibleEdges }
-}
-
-function rebuildFlow() {
-  const { nodes, edges } = flattenTreeWithDagre(tree.value)
-  flowNodes.value = nodes
-  flowEdges.value = edges
-}
-
-function changeLayoutOrientation(val) {
-  layoutOrientation.value = val
-  rebuildFlow()
-}
-
-function toggleTreeBranch(id) {
-  const key = String(id)
-  const next = new Set(collapsedBranchIds.value)
-  if (next.has(key)) next.delete(key)
-  else next.add(key)
-  collapsedBranchIds.value = next
-  rebuildFlow()
-}
-
-function expandAllTreeBranches() {
-  collapsedBranchIds.value = new Set()
-  rebuildFlow()
-}
-
-function collapseTreeToMainLine() {
-  const next = new Set()
-  function walk(node) {
-    if (!node) return
-    const id = nodeKey(node)
-    if (!mainLineIds.value.has(id) && (node.children || []).length) next.add(id)
-    ;(node.children || []).forEach(walk)
-  }
-  ;(tree.value || []).forEach(walk)
-  collapsedBranchIds.value = next
-  rebuildFlow()
-}
-
-function expandTreeToGeneration(generation) {
-  const next = new Set()
-  function walk(node, depth = 1) {
-    if (!node) return
-    const gen = Number(node.generation ?? node.generationNo ?? depth)
-    if (gen >= generation && (node.children || []).length) next.add(nodeKey(node))
-    ;(node.children || []).forEach(child => walk(child, gen + 1))
-  }
-  ;(tree.value || []).forEach(root => walk(root, Number(root.generation ?? root.generationNo ?? 1)))
-  collapsedBranchIds.value = next
-  rebuildFlow()
-}
-
-function onFlowNodeClick(evt) {
-  const id = Number(evt.node?.data?.id)
+function onFlowNodeClick(memberId) {
+  const id = Number(memberId)
   const m = members.value.find(x => Number(x.id) === id)
   if (m) {
     activeTreeMemberId.value = m.id
     openMember(m)
   }
 }
+
 
 function openMember(memberOrId) {
   if (memberOrId === null || memberOrId === undefined) return
@@ -843,7 +565,6 @@ async function loadAll() {
     if (can('source.view')) await loadSources()
     if (!canOpenSettingsPanel.value && tab.value === 'settings') tab.value = 'tree'
     if (!can('backup.view') && tab.value === 'backup') tab.value = 'tree'
-    rebuildFlow()
   } catch (e) {
     if (e?.response?.status === 401) {
       logout()
@@ -865,7 +586,6 @@ async function switchFamily(familyId) {
   try {
     const { data } = await api.get(`/families/${familyId}/tree`)
     tree.value = Array.isArray(data) ? data : (data?.nodes || [])
-    rebuildFlow()
     ElMessage.success(`已切换到 ${currentFamily.value?.name || '选中家族'}`)
   } catch (e) {
     ElMessage.error(e.response?.data?.detail || '切换家族失败')

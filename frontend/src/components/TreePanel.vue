@@ -30,24 +30,8 @@
 
       <div class="tree-toolbar__actions">
         <template v-if="displayMode === 'flow'">
-          <el-radio-group
-            :model-value="layoutOrientation"
-            size="small"
-            style="margin-right: 12px;"
-            @change="val => emit('update:layoutOrientation', val)"
-          >
-            <el-radio-button label="vertical">纵向吊线</el-radio-button>
-            <el-radio-button label="horizontal">横向长卷</el-radio-button>
-          </el-radio-group>
-          <el-checkbox
-            v-model="showBranchFrames"
-            size="small"
-            style="margin-right: 12px;"
-          >显示分支底框</el-checkbox>
-          <el-button size="small" @click="expandAll">全部展开</el-button>
-          <el-button size="small" @click="collapseToMainLine">只看主线</el-button>
-          <el-button size="small" @click="expandToGeneration(3)">展开到三世</el-button>
-          <el-button size="small" type="primary" plain @click="resetView">重置视图</el-button>
+          <el-button size="small" @click="resetSunburstZoom">返回始祖</el-button>
+          <el-button size="small" type="primary" plain @click="resetSunburstView">重置视图</el-button>
         </template>
         <template v-else>
           <el-button size="small" @click="resetReaderFilters">重置筛选</el-button>
@@ -150,99 +134,39 @@
       </aside>
     </div>
 
-    <div v-else :class="['tree-wrap flow-wrap', layoutOrientation === 'vertical' ? 'vertical-lineage-wrap' : 'horizontal-lineage-wrap']">
-      <VueFlow
-        v-model:nodes="innerNodes"
-        v-model:edges="innerEdges"
-        :fit-view-on-init="true"
-        :default-viewport="{ zoom: 0.56 }"
-        :min-zoom="0.12"
-        :max-zoom="1.5"
-        class="genealogy-flow horizontal-lineage-flow"
-        @node-click="onNodeClick"
-      >
-        <Background :gap="24" :size="1" pattern-color="#d8c3a588" />
-        <MiniMap pannable zoomable />
-        <Controls position="bottom-right" />
-        <template #node-person="nodeProps">
-          <div
-            class="node-card lineage-node-card"
-            :class="[
-              nodeProps.data.gender === '女' ? 'female' : 'male',
-              Number(nodeProps.data.id) === Number(activeMemberId) ? 'active' : '',
-              nodeProps.data.isMainLine ? 'is-main-line' : '',
-              nodeProps.data.isCollapsed ? 'is-collapsed' : '',
-              nodeProps.data.matchesSearch === true ? 'matches-search' : '',
-              nodeProps.data.matchesSearch === false ? 'dimmed' : ''
-            ]"
-            :style="{ '--branch-color': nodeProps.data.branchColor || '#c59b6b' }"
-          >
-            <!-- Handles for connecting lines -->
-            <Handle type="target" :position="layoutOrientation === 'vertical' ? 'top' : 'left'" style="opacity: 0; pointer-events: none;" />
-            <Handle type="source" :position="layoutOrientation === 'vertical' ? 'bottom' : 'right'" style="opacity: 0; pointer-events: none;" />
-
-            <div class="node-card__topline">
-              <span class="node-gender-dot" :class="nodeProps.data.gender === '女' ? 'female' : 'male'"></span>
-              <span class="node-generation">第{{ nodeProps.data.generation ?? '?' }}代</span>
-              <span v-if="nodeProps.data.branchLabel" class="node-branch-pill">{{ nodeProps.data.branchLabel }}</span>
-              <span v-if="nodeProps.data.visibilityScope === 'basic'" class="node-branch-pill relation">关系可见</span>
-            </div>
-            <div class="node-name">
-              {{ nodeProps.data.name }}
-              <span v-if="nodeProps.data.generationName" class="node-gen-name-tag">{{ nodeProps.data.generationName }}辈</span>
-            </div>
-            <div class="node-meta">{{ nodeProps.data.born || '生年不详' }}<span v-if="nodeProps.data.died"> · {{ nodeProps.data.died }}</span></div>
-            <div v-if="nodeProps.data.spouse" class="node-spouse">配偶：{{ nodeProps.data.spouse }}</div>
-            <button
-              v-if="nodeProps.data.hasChildren"
-              class="node-collapse-btn"
-              type="button"
-              @click.stop="toggleBranch(nodeProps.data.id)"
-            >
-              {{ nodeProps.data.isCollapsed ? `展开子嗣 ${nodeProps.data.descendantCount || nodeProps.data.childCount || ''}` : `收起支脉 ${nodeProps.data.descendantCount || ''}` }}
-            </button>
-            <div v-else class="node-hint">点击查看档案</div>
-          </div>
-        </template>
-      </VueFlow>
+    <div v-else class="tree-wrap flow-wrap sunburst-wrap">
+      <div ref="chartRef" class="sunburst-chart-canvas"></div>
     </div>
   </div>
 </template>
 
 <script setup>
 /**
- * TreePanel visualizes lineage in three modes:
+ * TreePanel visualizes lineage in two modes:
  * - reader: scrollable generation columns for daily genealogy reading
- * - focus: three-generation family context around the selected member
- * - flow: original Vue Flow panorama for complex relation inspection
+ * - flow: ECharts Sunburst panorama for complex relation inspection
  */
-import { computed, nextTick, ref, watch } from 'vue'
-import { VueFlow, useVueFlow, Handle } from '@vue-flow/core'
-import { Background } from '@vue-flow/background'
-import { MiniMap } from '@vue-flow/minimap'
-import { Controls } from '@vue-flow/controls'
+import { computed, nextTick, ref, watch, onMounted, onBeforeUnmount } from 'vue'
+import * as echarts from 'echarts'
 import { FAMILY_HUE_PRESETS, getFamilySurname, getBaseHueForSurname, generateFamilyPalette } from '../utils/genealogy'
 
 const props = defineProps({
-  nodes: { type: Array, default: () => [] },
-  edges: { type: Array, default: () => [] },
   tree: { type: Array, default: () => [] },
   members: { type: Array, default: () => [] },
   activeMemberId: { type: [Number, String], default: null },
   familyName: { type: String, default: '王氏家族' },
-  layoutOrientation: { type: String, default: 'vertical' },
 })
 
-const emit = defineEmits(['node-click', 'toggle-branch', 'expand-all', 'collapse-main-line', 'expand-generation', 'reset-view', 'update:layoutOrientation'])
-const { fitView } = useVueFlow()
+const emit = defineEmits(['node-click'])
 
 const displayMode = ref('reader')
 const searchKeyword = ref('')
 const branchFilter = ref('all')
 const localFocusMemberId = ref(null)
 const generationLimit = ref('5')
-const showBranchFrames = ref(false)
 
+const chartRef = ref(null)
+let chartInstance = null
 
 const branchPalette = computed(() => {
   const surname = getFamilySurname(props.familyName)
@@ -250,99 +174,350 @@ const branchPalette = computed(() => {
   return generateFamilyPalette(hue)
 })
 
-const innerNodes = computed({
-  get: () => {
-    let nodes = props.nodes || []
-    if (!showBranchFrames.value) {
-      nodes = nodes.filter(node => node.type !== 'group')
+// ECharts Sunburst Chart Implementation
+function initChart() {
+  if (!chartRef.value) return
+  if (chartInstance) {
+    chartInstance.dispose()
+  }
+  chartInstance = echarts.init(chartRef.value)
+  renderChart()
+  
+  chartInstance.on('click', (params) => {
+    if (params.data && params.data.id) {
+      setLocalFocus(params.data.id)
+      emit('node-click', params.data.id)
     }
-    const keyword = normalizeText(searchKeyword.value).toLowerCase()
+  })
+}
 
-    return nodes.map(node => {
-      if (node.type !== 'person') return node
-      const data = node.data || {}
-      
-      if (!keyword) {
-        return {
-          ...node,
-          class: '',
-          zIndex: node.zIndex || (data.isMainLine ? 20 : 10),
-          data: {
-            ...data,
-            matchesSearch: undefined
+function filterSunburstNode(node, isSearchActive, keyword) {
+  const data = node.rawMember || {}
+  const spouseNames = (data.spouses || []).map(s => s.name).filter(Boolean).join('、') || data.spouse || ''
+  const searchHaystack = [
+    data.name,
+    data.branch,
+    data.generationName,
+    data.rankTitle,
+    spouseNames,
+    data.birthPlace,
+    data.residence
+  ].filter(Boolean).join(' ').toLowerCase()
+  
+  const matches = isSearchActive && searchHaystack.includes(keyword)
+  
+  let childrenMatches = false
+  const children = []
+  if (node.children) {
+    for (const child of node.children) {
+      const childResult = filterSunburstNode(child, isSearchActive, keyword)
+      if (childResult.hasMatch) {
+        childrenMatches = true
+      }
+      children.push(childResult.node)
+    }
+  }
+  
+  const hasMatch = matches || childrenMatches
+  
+  const itemStyle = { ...node.itemStyle }
+  const labelStyle = { ...node.label }
+  
+  if (isSearchActive) {
+    if (matches) {
+      itemStyle.opacity = 1.0
+      itemStyle.borderColor = '#d3a26a'
+      itemStyle.borderWidth = 3
+      labelStyle.fontWeight = 'bold'
+    } else if (childrenMatches) {
+      itemStyle.opacity = 0.65
+      itemStyle.borderWidth = 1
+    } else {
+      itemStyle.opacity = 0.12
+      itemStyle.borderWidth = 0.5
+    }
+  } else {
+    itemStyle.opacity = 1.0
+    itemStyle.borderColor = '#ffffff'
+    itemStyle.borderWidth = 1
+  }
+  
+  return {
+    hasMatch,
+    node: {
+      ...node,
+      children: children.length ? children : undefined,
+      itemStyle,
+      label: {
+        ...node.label,
+        ...labelStyle
+      }
+    }
+  }
+}
+
+function getProcessedSunburstData() {
+  const roots = [...(props.tree || [])].sort(sortByGenealogy)
+  const maxDepth = generationLimit.value === 'all' ? Infinity : Number(generationLimit.value)
+  
+  const rootsMinGen = roots.length ? Math.min(...roots.map(root => {
+    const gen = root?.generation ?? root?.generationNo;
+    return gen !== null && gen !== undefined ? Number(gen) : 1;
+  })) : 1
+  const branchGen = rootsMinGen <= 1 ? 2 : rootsMinGen + 1
+  
+  const palette = branchPalette.value
+  const majorBranchIndexMap = new Map()
+  const familySurname = getFamilySurname(props.familyName)
+  const familyBaseHue = getBaseHueForSurname(familySurname)
+  
+  function getBranchColor(node, branchNode, rootIndex, gen) {
+    if (!branchNode) {
+      return { H: familyBaseHue, S: 16, L: 60 }
+    }
+    const key = nodeKey(branchNode)
+    if (!majorBranchIndexMap.has(key)) {
+      majorBranchIndexMap.set(key, majorBranchIndexMap.size)
+    }
+    const index = majorBranchIndexMap.get(key)
+    const hslStr = palette[index % palette.length]
+    const match = hslStr.match(/hsl\((\d+),\s*(\d+)%,\s*(\d+)%\)/)
+    if (match) {
+      return {
+        H: Number(match[1]),
+        S: Number(match[2]),
+        L: Number(match[3])
+      }
+    }
+    return { H: familyBaseHue, S: 80, L: 45 }
+  }
+  
+  function convertNode(node, depth, parentBranchNode, rootIndex) {
+    const id = nodeKey(node)
+    const gen = node.generation ?? depth
+    
+    let currentBranchNode = parentBranchNode
+    if (gen === branchGen) {
+      currentBranchNode = node
+    }
+    
+    const branchColorInfo = getBranchColor(node, currentBranchNode, rootIndex, gen)
+    const depthDiff = Math.max(0, gen - rootsMinGen)
+    const hue = branchColorInfo.H
+    const sat = Math.max(30, branchColorInfo.S - depthDiff * 7)
+    const light = Math.min(85, branchColorInfo.L + depthDiff * 6)
+    const color = `hsl(${hue}, ${sat}%, ${light}%)`
+    
+    const children = []
+    if (depth < maxDepth && node.children && node.children.length) {
+      const sortedChildren = [...node.children].sort(sortByGenealogy)
+      for (const child of sortedChildren) {
+        children.push(convertNode(child, depth + 1, currentBranchNode, rootIndex))
+      }
+    }
+    
+    const spouseNames = (node.spouses || []).map(s => s.name).filter(Boolean).join('、') || node.spouse || ''
+    const displayName = spouseNames ? `${node.name}\n(配:${spouseNames.split('、')[0]})` : node.name
+    
+    return {
+      id: id,
+      name: displayName,
+      value: 1,
+      children: children.length ? children : undefined,
+      itemStyle: {
+        color: color,
+        borderColor: '#ffffff',
+        borderWidth: 1
+      },
+      label: {
+        show: true
+      },
+      rawMember: node
+    }
+  }
+  
+  const convertedRoots = roots.map((root, rootIndex) => 
+    convertNode(root, 1, null, rootIndex)
+  )
+  
+  const keyword = normalizeText(searchKeyword.value).toLowerCase()
+  const isSearchActive = !!keyword
+  
+  const finalRoots = []
+  for (const root of convertedRoots) {
+    const filtered = filterSunburstNode(root, isSearchActive, keyword)
+    finalRoots.push(filtered.node)
+  }
+  
+  return finalRoots
+}
+
+function renderChart() {
+  if (!chartInstance) return
+  const data = getProcessedSunburstData()
+  
+  const option = {
+    tooltip: {
+      trigger: 'item',
+      backgroundColor: 'rgba(30, 25, 20, 0.95)',
+      borderColor: '#d3a26a',
+      borderWidth: 1,
+      textStyle: {
+        color: '#ffffff'
+      },
+      formatter: (params) => {
+        const data = params.data?.rawMember
+        if (!data) return ''
+        const genderColor = data.gender === '女' ? '#ff85a2' : '#85a2ff'
+        const spouse = (data.spouses || []).map(s => s.name).filter(Boolean).join('、') || data.spouse || '无'
+        const lifespan = `${data.birthDate || data.birthDateText || '生年不详'}${data.deathDate || data.deathDateText ? ' ~ ' + (data.deathDate || data.deathDateText) : ''}`
+        return `
+          <div style="padding: 6px; font-family: system-ui, sans-serif; line-height: 1.6;">
+            <div style="font-size: 15px; font-weight: bold; margin-bottom: 4px; border-bottom: 1px solid rgba(211,162,106,0.3); padding-bottom: 4px; display: flex; align-items: center; justify-content: space-between; gap: 20px;">
+              <span>${data.name}</span>
+              <span style="font-size: 11px; color: ${genderColor}; background: ${genderColor}18; padding: 1px 4px; border-radius: 3px; border: 1px solid ${genderColor}33;">
+                ${data.gender || '未知'}
+              </span>
+            </div>
+            <div style="font-size: 12px;">
+              <div><strong>世代：</strong>第 ${data.generation} 代 ${data.generationName ? `(${data.generationName}辈)` : ''}</div>
+              <div><strong>排行：</strong>${data.rankTitle || '无'}</div>
+              <div><strong>支系：</strong>${data.branch || '主脉'}</div>
+              <div><strong>生卒：</strong>${lifespan}</div>
+              <div><strong>配偶：</strong>${spouse}</div>
+              <div style="margin-top: 4px; font-size: 10px; color: rgba(255,255,255,0.5); border-top: 1px dashed rgba(255,255,255,0.15); padding-top: 4px;">
+                点击扇区即可打开个人档案
+              </div>
+            </div>
+          </div>
+        `
+      }
+    },
+    series: {
+      type: 'sunburst',
+      data: data,
+      radius: [0, '95%'],
+      sort: null,
+      emphasis: {
+        focus: 'ancestor'
+      },
+      levels: [
+        {},
+        {
+          r0: '0%',
+          r: '22%',
+          label: {
+            rotate: 'tangential',
+            fontSize: 12,
+            color: '#ffffff',
+            textBorderColor: 'rgba(0,0,0,0.6)',
+            textBorderWidth: 2
+          }
+        },
+        {
+          r0: '22%',
+          r: '45%',
+          label: {
+            rotate: 'tangential',
+            fontSize: 11,
+            color: '#ffffff',
+            textBorderColor: 'rgba(0,0,0,0.6)',
+            textBorderWidth: 2
+          }
+        },
+        {
+          r0: '45%',
+          r: '70%',
+          label: {
+            align: 'right',
+            fontSize: 10,
+            color: '#ffffff',
+            textBorderColor: 'rgba(0,0,0,0.6)',
+            textBorderWidth: 2
+          }
+        },
+        {
+          r0: '70%',
+          r: '92%',
+          label: {
+            position: 'outside',
+            padding: 3,
+            silent: false,
+            fontSize: 9,
+            color: '#333333'
+          },
+          itemStyle: {
+            borderWidth: 1.5
           }
         }
-      }
+      ],
+      nodeClick: 'zoom'
+    }
+  }
+  chartInstance.setOption(option)
+}
 
-      const searchHaystack = [
-        data.name,
-        data.branchLabel,
-        data.generationName,
-        data.spouse,
-        data.born,
-        data.died
-      ].filter(Boolean).join(' ').toLowerCase()
-      const matches = searchHaystack.includes(keyword)
-      return {
-        ...node,
-        class: matches ? 'matches-search' : 'dimmed',
-        zIndex: matches ? 30 : (node.zIndex || (data.isMainLine ? 20 : 10)),
-        data: {
-          ...data,
-          matchesSearch: matches
-        }
-      }
+function resetSunburstZoom() {
+  if (chartInstance) {
+    chartInstance.dispatchAction({
+      type: 'sunburstRootToNode',
+      nodeId: null
     })
-  },
-  set: () => {}
+  }
+}
+
+function resetSunburstView() {
+  searchKeyword.value = ''
+  generationLimit.value = '5'
+  resetSunburstZoom()
+  renderChart()
+}
+
+function handleResize() {
+  if (chartInstance) {
+    chartInstance.resize()
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('resize', handleResize)
+  if (displayMode.value === 'flow') {
+    nextTick(() => {
+      initChart()
+    })
+  }
 })
-const innerEdges = computed({
-  get: () => {
-    const edges = props.edges || []
-    const keyword = normalizeText(searchKeyword.value).toLowerCase()
-    if (!keyword) {
-      return edges.map(edge => ({
-        ...edge,
-        style: {
-          ...edge.style,
-          opacity: undefined
-        }
-      }))
-    }
 
-    const matchIds = new Set()
-    for (const node of props.nodes || []) {
-      if (node.type !== 'person') continue
-      const data = node.data || {}
-      const searchHaystack = [
-        data.name,
-        data.branchLabel,
-        data.generationName,
-        data.spouse,
-        data.born,
-        data.died
-      ].filter(Boolean).join(' ').toLowerCase()
-      if (searchHaystack.includes(keyword)) {
-        matchIds.add(String(node.id))
-      }
-    }
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', handleResize)
+  if (chartInstance) {
+    chartInstance.dispose()
+  }
+})
 
-    return edges.map(edge => {
-      const sourceMatch = matchIds.has(String(edge.source))
-      const targetMatch = matchIds.has(String(edge.target))
-      const shouldDim = !sourceMatch || !targetMatch
-      return {
-        ...edge,
-        class: `${edge.class || ''} ${shouldDim ? 'dimmed-edge' : ''}`.trim(),
-        style: {
-          ...edge.style,
-          opacity: shouldDim ? 0.16 : 1,
-          transition: 'opacity 0.3s'
-        }
-      }
+watch(displayMode, (newMode) => {
+  if (newMode === 'flow') {
+    nextTick(() => {
+      initChart()
     })
-  },
-  set: () => {}
+  } else {
+    if (chartInstance) {
+      chartInstance.dispose()
+      chartInstance = null
+    }
+  }
+})
+
+watch(() => props.tree, () => {
+  if (displayMode.value === 'flow') {
+    renderChart()
+  }
+}, { deep: true })
+
+watch([searchKeyword, generationLimit], () => {
+  if (displayMode.value === 'flow') {
+    renderChart()
+  }
 })
 
 const modeLabel = computed(() => ({ reader: '族谱阅读', flow: '全景关系图' }[displayMode.value] || '族谱阅读'))
@@ -881,29 +1056,7 @@ function setBranchFilter(branchKey) {
 
 function selectMember(id) {
   setLocalFocus(id)
-  emit('node-click', { node: { data: { id } } })
-}
-
-function onNodeClick(evt) {
-  const id = evt?.node?.data?.id
-  if (id) setLocalFocus(id)
-  emit('node-click', evt)
-}
-
-function toggleBranch(id) {
-  emit('toggle-branch', id)
-}
-
-function expandAll() {
-  emit('expand-all')
-}
-
-function collapseToMainLine() {
-  emit('collapse-main-line')
-}
-
-function expandToGeneration(generation) {
-  emit('expand-generation', generation)
+  emit('node-click', id)
 }
 
 function resetReaderFilters() {
@@ -916,35 +1069,15 @@ function resetReaderFilters() {
 
 async function switchToFlowAndReset() {
   displayMode.value = 'flow'
-  await resetView()
 }
 
-async function resetView() {
-  emit('reset-view')
-  await nextTick()
-  try {
-    await fitView({ duration: 420, padding: 0.18, maxZoom: 0.72 })
-  } catch {
-    // noop
-  }
-}
-
-watch(() => props.activeMemberId, async (id) => {
+watch(() => props.activeMemberId, (id) => {
   if (id) setLocalFocus(id)
-  if (!id || displayMode.value !== 'flow') return
-  await nextTick()
-  const targetNodes = (props.nodes || []).filter(node => Number(node?.data?.id) === Number(id)).map(node => ({ id: node.id }))
-  if (!targetNodes.length) return
-  try {
-    await fitView({
-      nodes: targetNodes,
-      duration: 500,
-      padding: 0.32,
-      maxZoom: 1.05,
-    })
-  } catch {
-    // noop
-  }
+  if (!id || displayMode.value !== 'flow' || !chartInstance) return
+  chartInstance.dispatchAction({
+    type: 'sunburstRootToNode',
+    nodeId: String(id)
+  })
 })
 
 watch(branchOptions, (options) => {
@@ -1510,178 +1643,23 @@ watch(readerItems, (items) => {
 .tree-toolbar__legend :deep(.el-tag) {
   border-radius: 999px;
 }
-.flow-wrap :deep(.vue-flow__background path) { stroke: color-mix(in srgb, var(--border) 70%, transparent); }
-.flow-wrap :deep(.vue-flow__edge-path) { stroke: var(--line); stroke-width: 2.2; }
-.flow-wrap :deep(.lineage-edge-main .vue-flow__edge-path) { stroke: #6d3f1f; stroke-width: 4.2; }
-.flow-wrap :deep(.lineage-edge-branch .vue-flow__edge-path) { stroke-width: 2.25; }
-.flow-wrap :deep(.vue-flow__controls-button),
-.flow-wrap :deep(.vue-flow__minimap) {
-  background: var(--card-bg);
-  color: var(--text-main);
-  border-color: var(--border);
-}
-.horizontal-lineage-wrap {
-  background:
-    linear-gradient(90deg, rgba(139,69,19,.045) 0 1px, transparent 1px) 0 0 / 330px 100%,
-    linear-gradient(180deg, color-mix(in srgb, var(--card-bg) 95%, #fff), var(--card-bg));
-}
-.horizontal-lineage-flow :deep(.vue-flow__node-group) {
-  pointer-events: none;
-}
-.lineage-node-card {
-  position: relative;
-  min-height: 128px;
-  border-left-color: var(--branch-color) !important;
-  overflow: hidden;
-}
-.lineage-node-card::before {
-  content: '';
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 7px;
-  background: var(--branch-color);
-  opacity: .72;
-}
-.lineage-node-card.is-main-line {
-  border-color: #c08a50;
-  box-shadow: 0 0 0 2px rgba(192,138,80,.14), 0 14px 28px rgba(109,63,31,.16);
-}
-.lineage-node-card.is-main-line::after {
-  content: '主线';
-  position: absolute;
-  right: 10px;
-  top: 9px;
-  font-size: 10px;
-  color: #8b4513;
-  background: rgba(255,244,224,.9);
-  border: 1px solid rgba(192,138,80,.32);
-  border-radius: 999px;
-  padding: 2px 7px;
-}
-.node-branch-pill {
-  margin-left: auto;
-  font-size: 10px;
-  color: #6d5038;
-  border: 1px solid color-mix(in srgb, var(--branch-color) 58%, #fff);
-  background: color-mix(in srgb, var(--branch-color) 16%, #fff);
-  border-radius: 999px;
-  padding: 2px 7px;
-}
-.node-collapse-btn {
-  margin-top: 8px;
+.sunburst-wrap {
   width: 100%;
-  border: 1px solid color-mix(in srgb, var(--branch-color) 46%, var(--border));
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--branch-color) 10%, var(--card-bg));
-  color: var(--text-main);
-  font-size: 12px;
-  line-height: 26px;
-  cursor: pointer;
-}
-.node-collapse-btn:hover {
-  background: color-mix(in srgb, var(--branch-color) 18%, var(--card-bg));
-}
-.lineage-node-card.is-collapsed {
-  outline: 2px dashed color-mix(in srgb, var(--branch-color) 52%, transparent);
-  outline-offset: 2px;
-}
-
-.node-card {
-  width: 220px;
-  border-radius: 18px;
-  background:
-    linear-gradient(180deg, rgba(255,255,255,.92), rgba(255,250,241,.98));
-  border: 1px solid #d8c3a5;
-  box-shadow: 0 10px 24px rgba(62,44,28,.08);
-  transition: all .2s;
-  padding: 12px 12px 10px;
-}
-:root[data-theme='dark'] .node-card {
-  background: linear-gradient(180deg, #3b3025, #2f261d);
-  border-color: #7b644c;
-  color: #f3e7d3;
-}
-.node-card:hover { transform: translateY(-2px); box-shadow: 0 12px 26px rgba(0,0,0,.14); }
-.node-card.active {
-  border-color: #c48b58;
-  box-shadow: 0 0 0 3px rgba(196,139,88,.16), 0 12px 26px rgba(0,0,0,.14);
-}
-.node-card.male { border-left: 5px solid #9a6b3f; }
-.node-card.female { border-left: 5px solid #b06b6b; }
-:root[data-theme='dark'] .node-card.active {
-  box-shadow: 0 0 0 3px rgba(196,139,88,.24), 0 12px 26px rgba(0,0,0,.14);
-}
-.node-card__topline {
+  height: 100%;
+  min-height: 720px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--card-bg) 96%, #fff), var(--card-bg));
   display: flex;
+  justify-content: center;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 6px;
+  padding: 16px;
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  margin-top: 12px;
 }
-.node-gender-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  flex: none;
-}
-.node-gender-dot.male { background: #9a6b3f; }
-.node-gender-dot.female { background: #b06b6b; }
-.node-generation {
-  font-size: 11px;
-  color: var(--text-secondary);
-}
-.node-name {
-  font-size: 18px;
-  font-weight: 700;
-  margin-bottom: 6px;
-  line-height: 1.25;
-}
-.node-meta { font-size: 12px; color: #7a6855; }
-.node-spouse { font-size: 12px; color: var(--primary); margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--border); }
-:root[data-theme='dark'] .node-meta,
-:root[data-theme='dark'] .node-generation { color: #cebca3; }
-:root[data-theme='dark'] .node-meta { color: #d8c5ab; }
-:root[data-theme='dark'] .node-spouse { color: var(--primary-light); }
-:root[data-theme='dark'] .node-hint { color: #7a6b58; }
-
-.node-hint { font-size: 10px; color: #b8a088; text-align: right; margin-top: 2px; opacity: 0; transition: opacity .2s; }
-.node-card:hover .node-hint { opacity: 1; }
-
-.node-gen-name-tag {
-  font-size: 11px;
-  font-weight: 500;
-  color: #fff;
-  background-color: var(--primary);
-  padding: 1px 5px;
-  border-radius: 4px;
-  margin-left: 6px;
-  vertical-align: middle;
-}
-
-.vertical-lineage-wrap {
-  background:
-    linear-gradient(180deg, rgba(139,69,19,.045) 0 1px, transparent 1px) 0 0 / 100% 260px,
-    linear-gradient(180deg, color-mix(in srgb, var(--card-bg) 95%, #fff), var(--card-bg));
-}
-
-/* 关系图搜索高亮与灰度暗化样式 */
-.lineage-node-card.dimmed,
-.vue-flow__node.dimmed .lineage-node-card {
-  opacity: 0.28;
-  filter: grayscale(40%);
-  transition: opacity 0.3s, filter 0.3s;
-}
-
-.lineage-node-card.matches-search,
-.vue-flow__node.matches-search .lineage-node-card {
-  outline: 3px solid #d3a26a !important;
-  outline-offset: 3px;
-  box-shadow: 0 0 16px rgba(211, 162, 106, 0.6) !important;
-  animation: search-glow 2.2s infinite alternate;
-  transition: all 0.3s;
-}
-
-@keyframes search-glow {
-  from { box-shadow: 0 0 8px rgba(211, 162, 106, 0.4); }
-  to { box-shadow: 0 0 20px rgba(211, 162, 106, 0.85); }
+.sunburst-chart-canvas {
+  width: 100%;
+  height: 100%;
+  min-height: 700px;
 }
 </style>
