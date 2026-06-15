@@ -3280,6 +3280,52 @@ def delete_backup(filename: str, user: User = Depends(require_capability('backup
         audit_session.commit()
     return {'ok': True, 'deleted': filename}
 
+@app.post('/admin/backups/upload')
+async def upload_backup(file: UploadFile, user: User = Depends(require_capability('backup.restore'))):
+    """上传备份文件（需要恢复权限）"""
+    if not file.filename or not file.filename.endswith('.db'):
+        raise HTTPException(400, '仅支持 .db 格式的 SQLite 备份文件')
+    
+    # 生成安全的文件名（带时间戳和原始文件名）
+    safe_filename = f'uploaded-{local_timestamp_for_filename()}-{file.filename}'
+    target_path = (BACKUP_DIR / safe_filename).resolve()
+    
+    # 确保路径安全
+    if BACKUP_DIR.resolve() not in target_path.parents:
+        raise HTTPException(400, '非法的文件路径')
+    
+    # 保存上传的文件
+    try:
+        content = await file.read()
+        with open(target_path, 'wb') as f:
+            f.write(content)
+        
+        # 验证是否为有效的 SQLite 文件
+        validate_sqlite_backup_file(target_path)
+        
+        # 记录审计日志
+        with Session(engine) as audit_session:
+            write_audit_log(
+                audit_session, user, 'backup.upload',
+                target_type='backup', target_id=safe_filename, target_label=safe_filename,
+                detail={'originalFilename': file.filename, 'size': len(content)}
+            )
+            audit_session.commit()
+        
+        return {
+            'ok': True,
+            'filename': safe_filename,
+            'originalFilename': file.filename,
+            'size': len(content)
+        }
+    except HTTPException:
+        # 如果验证失败，删除已上传的文件
+        target_path.unlink(missing_ok=True)
+        raise
+    except Exception as exc:
+        target_path.unlink(missing_ok=True)
+        raise HTTPException(500, f'上传备份失败: {str(exc)}') from exc
+
 @app.post('/admin/restore/{filename}')
 def restore(filename: str, user: User = Depends(require_capability('backup.restore'))):
     target = (BACKUP_DIR / filename).resolve()

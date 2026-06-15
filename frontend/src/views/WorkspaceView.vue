@@ -150,6 +150,7 @@
             @download-backup="downloadBackup"
             @restore-backup="restoreBackup"
             @delete-backup="deleteBackup"
+            @upload-backup="uploadBackup"
           />
         </el-tab-pane>
 
@@ -1247,6 +1248,56 @@ async function deleteBackup(row) {
     await loadAuditLogs()
   } catch {
     // cancelled
+  }
+}
+
+async function uploadBackup(file) {
+  if (!can('backup.restore')) return
+  if (!file?.raw) {
+    ElMessage.error('上传失败：文件无效')
+    return
+  }
+  
+  // 检查文件格式
+  if (!file.name.endsWith('.db')) {
+    ElMessage.error('仅支持 .db 格式的 SQLite 备份文件')
+    return
+  }
+  
+  // 检查文件大小（限制 100MB）
+  const maxSize = 100 * 1024 * 1024
+  if (file.size > maxSize) {
+    ElMessage.error('文件过大，最大支持 100MB')
+    return
+  }
+  
+  try {
+    await ElMessageBox.confirm(
+      `确定上传备份文件「${file.name}」？上传后可在列表中找到并恢复。`,
+      '确认上传备份',
+      { confirmButtonText: '上传', cancelButtonText: '取消', type: 'info' }
+    )
+    
+    const formData = new FormData()
+    formData.append('file', file.raw)
+    
+    loading.value = true
+    const { data } = await api.post('/admin/backups/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    })
+    
+    ElMessage.success(`备份文件已上传：${data.filename}`)
+    await loadAll()
+    await loadAuditLogs()
+  } catch (e) {
+    if (e === 'cancel' || e === 'close') return
+    if (e?.response?.status === 401) {
+      logout()
+      return
+    }
+    ElMessage.error(e.response?.data?.detail || '上传备份失败')
+  } finally {
+    loading.value = false
   }
 }
 

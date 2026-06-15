@@ -9,6 +9,16 @@
         <el-tag type="info">总数 {{ backups.length }}</el-tag>
         <el-tag type="success">手动 {{ manualCount }}</el-tag>
         <el-tag type="warning">自动 {{ autoCount }}</el-tag>
+        <el-upload
+          v-if="canRestore"
+          :show-file-list="false"
+          :auto-upload="false"
+          accept=".db"
+          :on-change="handleUpload"
+          style="margin-left: 12px; display: inline-block;"
+        >
+          <el-button type="primary" size="small" :icon="Upload">上传备份</el-button>
+        </el-upload>
       </div>
     </div>
 
@@ -57,6 +67,7 @@
 
 <script setup>
 import { computed } from 'vue'
+import { Upload } from '@element-plus/icons-vue'
 
 const props = defineProps({
   backups: { type: Array, default: () => [] },
@@ -64,6 +75,12 @@ const props = defineProps({
   canRestore: { type: Boolean, default: false },
   canDelete: { type: Boolean, default: false },
 })
+
+const emit = defineEmits(['download-backup', 'restore-backup', 'delete-backup', 'upload-backup'])
+
+function handleUpload(file) {
+  emit('upload-backup', file)
+}
 
 function tagType(type) {
   if (type === 'manual') return 'success'
@@ -94,8 +111,6 @@ function formatSize(bytes) {
 
 const manualCount = computed(() => props.backups.filter(b => b.backupType === 'manual' || b.isManual).length)
 const autoCount = computed(() => props.backups.filter(b => b.backupType === 'auto' || b.isAuto).length)
-
-defineEmits(['download-backup', 'restore-backup', 'delete-backup'])
 </script>
 
 <style scoped>
