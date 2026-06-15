@@ -129,21 +129,19 @@
               <span>贰 · 成员录</span>
             </span>
           </template>
-          <div style="margin-bottom:10px; display:flex; gap:10px; align-items:center">
-            <el-button v-if="can('member.create')" type="primary" size="small" @click="openCreateForm">+ 新增成员</el-button>
-            <el-tag type="info">当前角色：{{ currentUser.displayName }} / {{ roleLabel }}</el-tag>
-          </div>
           <MembersPanel
             :members="members"
             :visible-fields="settings.memberVisibleFields"
             :can-edit="can('member.edit_profile')"
             :can-delete="can('member.delete')"
             :can-config-fields="can('settings.edit_display')"
+            :can-create="can('member.create')"
             :families="families"
             @open-member="openMember"
             @edit-member="startEdit"
             @delete-member="confirmDelete"
             @update-visible-fields="updateMemberVisibleFields"
+            @create-member="openCreateForm"
           />
         </el-tab-pane>
 

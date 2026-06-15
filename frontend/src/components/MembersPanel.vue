@@ -61,6 +61,7 @@
       </div>
 
       <div class="quality-board-compact__actions">
+        <el-button v-if="canCreate" type="primary" size="small" @click="$emit('create-member')">+ 新增成员</el-button>
         <el-button v-if="canConfigFields" size="small" plain @click="openFieldDialog">显示字段</el-button>
         <el-button size="small" plain @click="resetFilters">重置筛选</el-button>
         <el-radio-group v-model="mode" size="small">
@@ -226,10 +227,11 @@ const props = defineProps({
   canEdit: { type: Boolean, default: false },
   canDelete: { type: Boolean, default: false },
   canConfigFields: { type: Boolean, default: false },
+  canCreate: { type: Boolean, default: false },
   families: { type: Array, default: () => [] },
 })
 
-const emit = defineEmits(['open-member', 'edit-member', 'delete-member', 'update-visible-fields'])
+const emit = defineEmits(['open-member', 'edit-member', 'delete-member', 'update-visible-fields', 'create-member'])
 const mode = ref('table')
 const keyword = ref('')
 const genderFilter = ref('')
