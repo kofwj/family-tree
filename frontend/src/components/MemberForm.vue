@@ -557,14 +557,22 @@ async function initBurialMap() {
       maxZoom: 18,
       attribution: '&copy; 高德地图',
     }).addTo(leafletMap)
+    
     leafletMap.on('click', async (event) => {
       await setMapSelection(event.latlng.lat, event.latlng.lng, '')
     })
-    if (mapSelectedLat.value && mapSelectedLng.value) {
-      setMarker(Number(mapSelectedLat.value), Number(mapSelectedLng.value))
-    } else if (mapSearchKeyword.value) {
-      setTimeout(searchBurialPlace, 300)
-    }
+    
+    // Force map size recalculation and placement of marker after container is fully visible
+    setTimeout(() => {
+      if (leafletMap) {
+        leafletMap.invalidateSize()
+        if (mapSelectedLat.value && mapSelectedLng.value) {
+          setMarker(Number(mapSelectedLat.value), Number(mapSelectedLng.value))
+        } else if (mapSearchKeyword.value) {
+          searchBurialPlace()
+        }
+      }
+    }, 200)
   } catch (e) {
     ElMessage.error(e.message || '地图加载失败')
   }
@@ -572,8 +580,18 @@ async function initBurialMap() {
 
 function setMarker(lat, lng) {
   if (!leafletMap || !L) return
-  if (!leafletMarker) leafletMarker = L.marker([lat, lng]).addTo(leafletMap)
-  else leafletMarker.setLatLng([lat, lng])
+  const customIcon = L.divIcon({
+    html: `<svg viewBox="0 0 24 24" width="32" height="32" style="display:block;"><path fill="#e65100" d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>`,
+    className: 'custom-leaflet-marker',
+    iconSize: [32, 32],
+    iconAnchor: [16, 32],
+  })
+  if (!leafletMarker) {
+    leafletMarker = L.marker([lat, lng], { icon: customIcon }).addTo(leafletMap)
+  } else {
+    leafletMarker.setIcon(customIcon)
+    leafletMarker.setLatLng([lat, lng])
+  }
   leafletMap.setView([lat, lng], Math.max(leafletMap.getZoom(), 15))
 }
 
