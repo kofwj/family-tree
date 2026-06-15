@@ -153,6 +153,8 @@ def test_map_proxy_endpoints(client, monkeypatch):
             return MockResponse(b'[{"place_id":123,"lat":"1.0","lon":"2.0","display_name":"Mock Place"}]')
         elif "reverse" in req.full_url:
             return MockResponse(b'{"place_id":123,"lat":"1.0","lon":"2.0","display_name":"Mock Place"}')
+        elif "appmaptile" in req.full_url or "tile.openstreetmap.org" in req.full_url:
+            return MockResponse(b'fake_tile_bytes')
         raise ValueError("Unexpected url")
 
     import urllib.request
@@ -167,5 +169,18 @@ def test_map_proxy_endpoints(client, monkeypatch):
     res_reverse = client.get("/map/reverse?lat=1.0&lon=2.0", headers=auth_headers(token))
     assert res_reverse.status_code == 200
     assert res_reverse.json()["display_name"] == "Mock Place"
+
+    # Test Tile Proxy (Gaode)
+    res_tile_gaode = client.get("/map/tile/11/1713/796.png?source=gaode", headers=auth_headers(token))
+    assert res_tile_gaode.status_code == 200
+    assert res_tile_gaode.content == b'fake_tile_bytes'
+    assert res_tile_gaode.headers['content-type'] == 'image/png'
+
+    # Test Tile Proxy (OSM)
+    res_tile_osm = client.get("/map/tile/11/1713/796.png?source=osm", headers=auth_headers(token))
+    assert res_tile_osm.status_code == 200
+    assert res_tile_osm.content == b'fake_tile_bytes'
+    assert res_tile_osm.headers['content-type'] == 'image/png'
+
 
 
