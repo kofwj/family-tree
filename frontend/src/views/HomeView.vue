@@ -3,8 +3,8 @@
     <div class="cover-glow cover-glow-a"></div>
     <div class="cover-glow cover-glow-b"></div>
     <div class="cover-inner">
-      <div class="brand-kicker">{{ effectiveCoverKicker }}</div>
-      <h1>{{ settings.siteTitle || '家谱管理系统' }}</h1>
+      <div class="brand-kicker">CLAN · GENEALOGY</div>
+      <h1>宗族家谱</h1>
       <p class="cover-subtitle" v-if="settings.subtitle">{{ settings.subtitle }}</p>
       
       <!-- Display the family tree general description / overview blurb -->
@@ -50,9 +50,7 @@ const settings = ref({
   treeDescription: '',
 })
 
-const effectiveCoverKicker = computed(() => {
-  return settings.value.coverKicker || 'CLAN · GENEALOGY'
-})
+
 
 function goWorkspace() {
   router.push('/workspace')
