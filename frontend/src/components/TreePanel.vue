@@ -30,6 +30,15 @@
 
       <div class="tree-toolbar__actions">
         <template v-if="displayMode === 'flow'">
+          <el-radio-group
+            :model-value="layoutOrientation"
+            size="small"
+            style="margin-right: 8px;"
+            @change="val => emit('update:layoutOrientation', val)"
+          >
+            <el-radio-button label="vertical">纵向吊线</el-radio-button>
+            <el-radio-button label="horizontal">横向长卷</el-radio-button>
+          </el-radio-group>
           <el-button size="small" @click="expandAll">全部展开</el-button>
           <el-button size="small" @click="collapseToMainLine">只看主线</el-button>
           <el-button size="small" @click="expandToGeneration(3)">展开到三世</el-button>
@@ -136,7 +145,7 @@
       </aside>
     </div>
 
-    <div v-else class="tree-wrap flow-wrap horizontal-lineage-wrap">
+    <div v-else :class="['tree-wrap flow-wrap', layoutOrientation === 'vertical' ? 'vertical-lineage-wrap' : 'horizontal-lineage-wrap']">
       <VueFlow
         v-model:nodes="innerNodes"
         v-model:edges="innerEdges"
@@ -161,13 +170,20 @@
             ]"
             :style="{ '--branch-color': nodeProps.data.branchColor || '#c59b6b' }"
           >
+            <!-- Handles for connecting lines -->
+            <Handle type="target" :position="layoutOrientation === 'vertical' ? 'top' : 'left'" style="opacity: 0; pointer-events: none;" />
+            <Handle type="source" :position="layoutOrientation === 'vertical' ? 'bottom' : 'right'" style="opacity: 0; pointer-events: none;" />
+
             <div class="node-card__topline">
               <span class="node-gender-dot" :class="nodeProps.data.gender === '女' ? 'female' : 'male'"></span>
               <span class="node-generation">第{{ nodeProps.data.generation ?? '?' }}代</span>
               <span v-if="nodeProps.data.branchLabel" class="node-branch-pill">{{ nodeProps.data.branchLabel }}</span>
               <span v-if="nodeProps.data.visibilityScope === 'basic'" class="node-branch-pill relation">关系可见</span>
             </div>
-            <div class="node-name">{{ nodeProps.data.name }}</div>
+            <div class="node-name">
+              {{ nodeProps.data.name }}
+              <span v-if="nodeProps.data.generationName" class="node-gen-name-tag">{{ nodeProps.data.generationName }}辈</span>
+            </div>
             <div class="node-meta">{{ nodeProps.data.born || '生年不详' }}<span v-if="nodeProps.data.died"> · {{ nodeProps.data.died }}</span></div>
             <div v-if="nodeProps.data.spouse" class="node-spouse">配偶：{{ nodeProps.data.spouse }}</div>
             <button
@@ -194,7 +210,7 @@
  * - flow: original Vue Flow panorama for complex relation inspection
  */
 import { computed, nextTick, ref, watch } from 'vue'
-import { VueFlow, useVueFlow } from '@vue-flow/core'
+import { VueFlow, useVueFlow, Handle } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { MiniMap } from '@vue-flow/minimap'
 import { Controls } from '@vue-flow/controls'
@@ -207,9 +223,10 @@ const props = defineProps({
   members: { type: Array, default: () => [] },
   activeMemberId: { type: [Number, String], default: null },
   familyName: { type: String, default: '王氏家族' },
+  layoutOrientation: { type: String, default: 'vertical' },
 })
 
-const emit = defineEmits(['node-click', 'toggle-branch', 'expand-all', 'collapse-main-line', 'expand-generation', 'reset-view'])
+const emit = defineEmits(['node-click', 'toggle-branch', 'expand-all', 'collapse-main-line', 'expand-generation', 'reset-view', 'update:layoutOrientation'])
 const { fitView } = useVueFlow()
 
 const displayMode = ref('reader')
@@ -1534,4 +1551,21 @@ watch(readerItems, (items) => {
 
 .node-hint { font-size: 10px; color: #b8a088; text-align: right; margin-top: 2px; opacity: 0; transition: opacity .2s; }
 .node-card:hover .node-hint { opacity: 1; }
+
+.node-gen-name-tag {
+  font-size: 11px;
+  font-weight: 500;
+  color: #fff;
+  background-color: var(--primary);
+  padding: 1px 5px;
+  border-radius: 4px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+.vertical-lineage-wrap {
+  background:
+    linear-gradient(180deg, rgba(139,69,19,.045) 0 1px, transparent 1px) 0 0 / 100% 260px,
+    linear-gradient(180deg, color-mix(in srgb, var(--card-bg) 95%, #fff), var(--card-bg));
+}
 </style>

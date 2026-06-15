@@ -102,6 +102,8 @@
             :members="members"
             :active-member-id="activeTreeMemberId"
             :family-name="currentFamily?.name || currentFamily?.surname || '王氏家族'"
+            :layout-orientation="layoutOrientation"
+            @update:layout-orientation="changeLayoutOrientation"
             @node-click="onFlowNodeClick"
             @toggle-branch="toggleTreeBranch"
             @expand-all="expandAllTreeBranches"
@@ -310,6 +312,7 @@ const generationCount = computed(() => {
 
 const flowNodes = ref([])
 const flowEdges = ref([])
+const layoutOrientation = ref('vertical')
 
 const collapsedBranchIds = ref(new Set())
 const mainLineIds = ref(new Set())
@@ -446,9 +449,10 @@ function flattenTreeWithDagre(roots) {
   })
 
   const generations = [...generationMap.keys()].sort((a, b) => a - b)
-  const columnGap = 330
-  const rowGap = 178
-  const branchGroupGap = 92
+  const isVertical = layoutOrientation.value === 'vertical'
+  const columnGap = isVertical ? 280 : 330
+  const rowGap = isVertical ? 260 : 178
+  const branchGroupGap = isVertical ? 80 : 92
   const nodeW = 220
   const nodeH = 128
   const startX = 90
@@ -476,8 +480,16 @@ function flattenTreeWithDagre(roots) {
       }
       previousBranchIndex = item.branchInfo.index
       const generationBranchCount = branchCountsByGeneration.get(generation) || 1
-      const x = startX + (generation - generations[0]) * columnGap
-      const y = startY + rowIndex * rowGap + branchOffset + (generationBranchCount > 1 ? item.branchInfo.index * 10 : 0)
+      
+      let x, y
+      if (isVertical) {
+        y = startY + (generation - generations[0]) * rowGap
+        x = startX + rowIndex * columnGap + branchOffset + (generationBranchCount > 1 ? item.branchInfo.index * 10 : 0)
+      } else {
+        x = startX + (generation - generations[0]) * columnGap
+        y = startY + rowIndex * rowGap + branchOffset + (generationBranchCount > 1 ? item.branchInfo.index * 10 : 0)
+      }
+
       ordered.push({ ...item, x, y })
       const frame = branchFrames.get(item.branchInfo.label) || { color: item.branchInfo.color, minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity, label: item.branchInfo.label }
       frame.minX = Math.min(frame.minX, x - 28)
@@ -518,6 +530,7 @@ function flattenTreeWithDagre(roots) {
         name: item.node?.name || item.id,
         gender: item.node?.gender,
         generation: item.generation,
+        generationName: item.node?.generationName || undefined,
         born: item.node?.birthDate,
         died: item.node?.deathDate,
         spouse: item.spouseNames || undefined,
@@ -543,6 +556,11 @@ function rebuildFlow() {
   const { nodes, edges } = flattenTreeWithDagre(tree.value)
   flowNodes.value = nodes
   flowEdges.value = edges
+}
+
+function changeLayoutOrientation(val) {
+  layoutOrientation.value = val
+  rebuildFlow()
 }
 
 function toggleTreeBranch(id) {
