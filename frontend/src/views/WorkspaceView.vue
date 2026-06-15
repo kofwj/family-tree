@@ -678,6 +678,7 @@ async function onFormSubmit(formData) {
       source: formData.source || null,
       is_public: formData.isPublic !== false,
       privacy_level: formData.privacyLevel || 'public',
+      primary_family_id: formData.primaryFamilyId ?? null,
     }
     let savedMember = null
     if (editingMember.value?.id) {

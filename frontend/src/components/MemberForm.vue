@@ -361,6 +361,7 @@ const defaultForm = () => ({
   deathDate: '', deathCalendar: 'solar', deathLunarDate: '', deathIsLeapMonth: false, deathDateText: '',
   isLiving: true, spouseIds: [], fatherId: null, motherId: null, childrenNote: '', marriageYear: '', marriageNote: '',
   education: '', occupation: '', positionTitle: '', biography: '', source: '', isPublic: true,
+  primaryFamilyId: null,
 })
 
 const form = ref(defaultForm())
@@ -413,6 +414,7 @@ function memberToForm(member) {
     source: member.source || '',
     isPublic: member.isPublic !== false,
     privacyLevel: member.privacyLevel || 'public',
+    primaryFamilyId: member.primaryFamilyId ?? null,
   }
 }
 
