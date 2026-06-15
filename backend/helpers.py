@@ -1996,7 +1996,7 @@ def build_tree(session: Session, allowed_ids: Optional[set[int]] = None, visible
     preferred = [r for r in roots if r.get('generation') == min_gen]
     return preferred or roots
 
-PUBLIC_SETTING_KEYS = {'siteTitle', 'familySurname', 'subtitle', 'coverKicker'}
+PUBLIC_SETTING_KEYS = {'siteTitle', 'familySurname', 'subtitle', 'coverKicker', 'treeDescription'}
 DEFAULT_SETTINGS = AppSettings().model_dump()
 
 def decode_setting_value(key: str, value: Optional[str]):

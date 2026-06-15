@@ -4,8 +4,13 @@
     <div class="cover-glow cover-glow-b"></div>
     <div class="cover-inner">
       <div class="brand-kicker">{{ effectiveCoverKicker }}</div>
-      <h1>{{ settings.siteTitle }}</h1>
-      <p class="cover-subtitle">{{ settings.subtitle }}</p>
+      <h1>{{ settings.siteTitle || '家谱管理系统' }}</h1>
+      <p class="cover-subtitle" v-if="settings.subtitle">{{ settings.subtitle }}</p>
+      
+      <!-- Display the family tree general description / overview blurb -->
+      <div class="cover-desc" v-if="settings.treeDescription">
+        {{ settings.treeDescription }}
+      </div>
 
       <div class="cover-pills">
         <span>宗族总览</span>
@@ -38,10 +43,11 @@ const router = useRouter()
 const isAuthenticated = ref(false)
 const stats = ref({ members: '--', generations: '--', roots: '--' })
 const settings = ref({
-  siteTitle: '陈氏宗族家谱',
-  familySurname: '陈',
-  subtitle: '承先祖之德 · 启后世之贤',
-  coverKicker: 'CHEN CLAN · GENEALOGY',
+  siteTitle: '',
+  familySurname: '',
+  subtitle: '',
+  coverKicker: '',
+  treeDescription: '',
 })
 
 const effectiveCoverKicker = computed(() => {
@@ -49,7 +55,10 @@ const effectiveCoverKicker = computed(() => {
   if (rawKicker && rawKicker !== 'CHEN CLAN · GENEALOGY') {
     return rawKicker
   }
-  const surname = settings.value.familySurname || '陈'
+  const surname = settings.value.familySurname
+  if (!surname) {
+    return 'GENEALOGY SYSTEM'
+  }
   const pinyinMap = {
     '陈': 'CHEN', '王': 'WANG', '张': 'ZHANG', '李': 'LI', '刘': 'LIU',
     '赵': 'ZHAO', '周': 'ZHOU', '吴': 'WU', '徐': 'XU', '孙': 'SUN',
@@ -66,7 +75,7 @@ const effectiveCoverKicker = computed(() => {
     '石': 'SHI', '廖': 'LIAO', '金': 'JIN', '邹': 'ZOU', '陆': 'LU',
     '郝': 'HAO', '孔': 'KONG', '白': 'BAI', '崔': 'CUI', '康': 'KANG',
     '毛': 'MAO', '邱': 'QIU', '秦': 'QIN', '江': 'JIANG', '史': 'SHI',
-    '顾': 'GU', '侯': 'HOU', '邵': 'SHAO', '孟': 'MENG', '龙': 'LONG',
+    '顾': 'GU', '侯': 'HOU', '邵': 'SHAO', '稳': 'WEN', '孟': 'MENG', '龙': 'LONG',
     '万': 'WAN', '段': 'DUAN', '雷': 'LEI', '钱': 'QIAN', '汤': 'TANG',
     '尹': 'YIN', '黎': 'LI', '易': 'YI', '常': 'CHANG', '武': 'WU',
     '乔': 'QIAO', '贺': 'HE', '赖': 'LAI', '龚': 'GONG', '文': 'WEN'

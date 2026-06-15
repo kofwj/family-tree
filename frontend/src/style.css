@@ -513,6 +513,18 @@ body {
 }
 .cover-inner h1 { margin: 12px 0 8px; font-size: 44px; }
 .cover-subtitle { margin: 0 0 18px; color: var(--text-secondary); font-size: 16px; }
+.cover-desc {
+  max-width: 580px;
+  margin: 18px auto 24px;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.8;
+  background: color-mix(in srgb, var(--primary) 6%, transparent);
+  border-left: 3px solid var(--primary);
+  padding: 10px 18px;
+  border-radius: 4px 14px 14px 4px;
+  text-align: left;
+}
 .cover-pills {
   display: flex;
   justify-content: center;
