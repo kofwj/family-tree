@@ -266,6 +266,7 @@ import { VueFlow, useVueFlow } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { MiniMap } from '@vue-flow/minimap'
 import { Controls } from '@vue-flow/controls'
+import { FAMILY_HUE_PRESETS, getFamilySurname, getBaseHueForSurname, generateFamilyPalette } from '../utils/genealogy'
 
 const props = defineProps({
   nodes: { type: Array, default: () => [] },
@@ -285,55 +286,6 @@ const branchFilter = ref('all')
 const localFocusMemberId = ref(null)
 const generationLimit = ref('5')
 
-const FAMILY_HUE_PRESETS = {
-  '王': 32,   // Warm Amber / Bronze (王氏家族)
-  '孙': 210,  // Ocean Blue (孙氏家族)
-  '顾': 140,  // Jade Green (顾氏家族)
-  '曹': 280,  // Deep Violet / Purple (曹氏家族)
-  '周': 345,  // Rose Red (周氏家族)
-  '季': 45,   // Golden Yellow (季氏家族)
-  '成': 80,   // Olive / Sage Green (成氏家族)
-  '洪': 175,  // Muted Teal / Cyan (洪氏家族)
-  '张': 250,  // Indigo Blue (张氏家族)
-  '陈': 15    // Terracotta (陈氏家族)
-}
-
-function getFamilySurname(name) {
-  if (!name) return '王'
-  let s = String(name).replace(/(氏家族|氏宗族|氏族|宗族|家族|家谱)/g, '')
-  return s.charAt(0) || '王'
-}
-
-function getBaseHueForSurname(surname) {
-  const char = String(surname || '').charAt(0)
-  if (FAMILY_HUE_PRESETS[char] !== undefined) {
-    return FAMILY_HUE_PRESETS[char]
-  }
-  let hash = 0
-  for (let i = 0; i < char.length; i++) {
-    hash = char.charCodeAt(i) + ((hash << 5) - hash)
-  }
-  return Math.abs(hash) % 360
-}
-
-function generateFamilyPalette(baseHue) {
-  const palette = []
-  const variations = [
-    { hOff: 0,   s: 36, l: 48 }, // 1. Muted Base
-    { hOff: 8,   s: 30, l: 56 }, // 2. Lighter Analogous
-    { hOff: -8,  s: 42, l: 42 }, // 3. Deeper Muted
-    { hOff: 15,  s: 26, l: 62 }, // 4. Soft Pastel
-    { hOff: -15, s: 32, l: 46 }, // 5. Slate Muted
-    { hOff: 4,   s: 34, l: 52 }, // 6. Gentle Medium
-    { hOff: -4,  s: 38, l: 44 }, // 7. Richer Analogous
-    { hOff: 12,  s: 28, l: 60 }  // 8. Softest Light
-  ]
-  for (const v of variations) {
-    const h = (baseHue + v.hOff + 360) % 360
-    palette.push(`hsl(${h}, ${v.s}%, ${v.l}%)`)
-  }
-  return palette
-}
 
 const branchPalette = computed(() => {
   const surname = getFamilySurname(props.familyName)
@@ -1483,4 +1435,182 @@ watch(readerItems, (items) => {
     min-width: 230px;
   }
 }
+
+.tree-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--card-bg) 94%, #fff), color-mix(in srgb, var(--bg) 68%, #fff));
+}
+.tree-wrap {
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--card-bg) 95%, #fff), var(--card-bg));
+  height: calc(100vh - 270px);
+  overflow: hidden;
+}
+.tree-toolbar__eyebrow {
+  font-size: 12px;
+  letter-spacing: .12em;
+  color: #9a6b3f;
+}
+.tree-toolbar__title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-main);
+}
+.tree-toolbar__desc {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.tree-toolbar__legend {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.tree-toolbar__legend :deep(.el-tag) {
+  border-radius: 999px;
+}
+.flow-wrap :deep(.vue-flow__background path) { stroke: color-mix(in srgb, var(--border) 70%, transparent); }
+.flow-wrap :deep(.vue-flow__edge-path) { stroke: var(--line); stroke-width: 2.2; }
+.flow-wrap :deep(.lineage-edge-main .vue-flow__edge-path) { stroke: #6d3f1f; stroke-width: 4.2; }
+.flow-wrap :deep(.lineage-edge-branch .vue-flow__edge-path) { stroke-width: 2.25; }
+.flow-wrap :deep(.vue-flow__controls-button),
+.flow-wrap :deep(.vue-flow__minimap) {
+  background: var(--card-bg);
+  color: var(--text-main);
+  border-color: var(--border);
+}
+.horizontal-lineage-wrap {
+  background:
+    linear-gradient(90deg, rgba(139,69,19,.045) 0 1px, transparent 1px) 0 0 / 330px 100%,
+    linear-gradient(180deg, color-mix(in srgb, var(--card-bg) 95%, #fff), var(--card-bg));
+}
+.horizontal-lineage-flow :deep(.vue-flow__node-group) {
+  pointer-events: none;
+}
+.lineage-node-card {
+  position: relative;
+  min-height: 128px;
+  border-left-color: var(--branch-color) !important;
+  overflow: hidden;
+}
+.lineage-node-card::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 7px;
+  background: var(--branch-color);
+  opacity: .72;
+}
+.lineage-node-card.is-main-line {
+  border-color: #c08a50;
+  box-shadow: 0 0 0 2px rgba(192,138,80,.14), 0 14px 28px rgba(109,63,31,.16);
+}
+.lineage-node-card.is-main-line::after {
+  content: '主线';
+  position: absolute;
+  right: 10px;
+  top: 9px;
+  font-size: 10px;
+  color: #8b4513;
+  background: rgba(255,244,224,.9);
+  border: 1px solid rgba(192,138,80,.32);
+  border-radius: 999px;
+  padding: 2px 7px;
+}
+.node-branch-pill {
+  margin-left: auto;
+  font-size: 10px;
+  color: #6d5038;
+  border: 1px solid color-mix(in srgb, var(--branch-color) 58%, #fff);
+  background: color-mix(in srgb, var(--branch-color) 16%, #fff);
+  border-radius: 999px;
+  padding: 2px 7px;
+}
+.node-collapse-btn {
+  margin-top: 8px;
+  width: 100%;
+  border: 1px solid color-mix(in srgb, var(--branch-color) 46%, var(--border));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--branch-color) 10%, var(--card-bg));
+  color: var(--text-main);
+  font-size: 12px;
+  line-height: 26px;
+  cursor: pointer;
+}
+.node-collapse-btn:hover {
+  background: color-mix(in srgb, var(--branch-color) 18%, var(--card-bg));
+}
+.lineage-node-card.is-collapsed {
+  outline: 2px dashed color-mix(in srgb, var(--branch-color) 52%, transparent);
+  outline-offset: 2px;
+}
+
+.node-card {
+  width: 220px;
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.92), rgba(255,250,241,.98));
+  border: 1px solid #d8c3a5;
+  box-shadow: 0 10px 24px rgba(62,44,28,.08);
+  transition: all .2s;
+  padding: 12px 12px 10px;
+}
+:root[data-theme='dark'] .node-card {
+  background: linear-gradient(180deg, #3b3025, #2f261d);
+  border-color: #7b644c;
+  color: #f3e7d3;
+}
+.node-card:hover { transform: translateY(-2px); box-shadow: 0 12px 26px rgba(0,0,0,.14); }
+.node-card.active {
+  border-color: #c48b58;
+  box-shadow: 0 0 0 3px rgba(196,139,88,.16), 0 12px 26px rgba(0,0,0,.14);
+}
+.node-card.male { border-left: 5px solid #9a6b3f; }
+.node-card.female { border-left: 5px solid #b06b6b; }
+:root[data-theme='dark'] .node-card.active {
+  box-shadow: 0 0 0 3px rgba(196,139,88,.24), 0 12px 26px rgba(0,0,0,.14);
+}
+.node-card__topline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.node-gender-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex: none;
+}
+.node-gender-dot.male { background: #9a6b3f; }
+.node-gender-dot.female { background: #b06b6b; }
+.node-generation {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.node-name {
+  font-size: 18px;
+  font-weight: 700;
+  margin-bottom: 6px;
+  line-height: 1.25;
+}
+.node-meta { font-size: 12px; color: #7a6855; }
+.node-spouse { font-size: 12px; color: var(--primary); margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--border); }
+:root[data-theme='dark'] .node-meta,
+:root[data-theme='dark'] .node-generation { color: #cebca3; }
+:root[data-theme='dark'] .node-meta { color: #d8c5ab; }
+:root[data-theme='dark'] .node-spouse { color: var(--primary-light); }
+:root[data-theme='dark'] .node-hint { color: #7a6b58; }
+
+.node-hint { font-size: 10px; color: #b8a088; text-align: right; margin-top: 2px; opacity: 0; transition: opacity .2s; }
+.node-card:hover .node-hint { opacity: 1; }
 </style>
