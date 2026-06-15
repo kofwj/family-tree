@@ -488,7 +488,7 @@ const readerItems = computed(() => {
       privacyLevel: member.privacyLevel,
       privacyLabel: member.privacyLabel || privacyLabel(member.privacyLevel),
       hasSource: Boolean(normalizeText(member.source)),
-      isMainLine: false,
+      isMainLine: parentItem?.isMainLine || false,
       isRelationSupplement: true,
       visibilityScope: member.visibilityScope || 'full',
       visibilityLabel: member.visibilityLabel || '',
@@ -533,10 +533,7 @@ const readerItems = computed(() => {
         parentItem = fatherItem || motherItem
       }
       if (!parentItem) continue
-      if (addRelationSupplement(member, parentItem)) {
-        changed = true
-        console.log(`[ColorSync] Supplemented member: ${member.name}, under parent: ${parentItem.name}, inherited color: ${parentItem.branchColor}`);
-      }
+      if (addRelationSupplement(member, parentItem)) changed = true
     }
     if (!changed) break
   }
@@ -584,7 +581,6 @@ const readerItems = computed(() => {
     return pathA.length - pathB.length
   }
 
-  console.log("[ColorSync] Final readerItems:", items.map(it => ({ name: it.name, branchKey: it.branchKey, branchColor: it.branchColor })));
   return items.sort(compareLineage)
 })
 
