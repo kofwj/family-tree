@@ -510,7 +510,28 @@ const readerItems = computed(() => {
       if (!id || seen.has(id)) continue
       const fatherItem = itemById.get(toNumber(relationFatherId(member)))
       const motherItem = itemById.get(toNumber(relationMotherId(member)))
-      const parentItem = fatherItem || motherItem
+      let parentItem = null
+      if (fatherItem && motherItem) {
+        const fatherIsSupp = fatherItem.isRelationSupplement
+        const motherIsSupp = motherItem.isRelationSupplement
+        if (fatherIsSupp && !motherIsSupp) {
+          parentItem = motherItem
+        } else if (!fatherIsSupp && motherIsSupp) {
+          parentItem = fatherItem
+        } else {
+          const fatherIsMain = fatherItem.branchKey === 'main'
+          const motherIsMain = motherItem.branchKey === 'main'
+          if (fatherIsMain && !motherIsMain) {
+            parentItem = motherItem
+          } else if (!fatherIsMain && motherIsMain) {
+            parentItem = fatherItem
+          } else {
+            parentItem = fatherItem || motherItem
+          }
+        }
+      } else {
+        parentItem = fatherItem || motherItem
+      }
       if (!parentItem) continue
       if (addRelationSupplement(member, parentItem)) changed = true
     }
