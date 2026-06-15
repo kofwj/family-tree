@@ -33,12 +33,17 @@
           <el-radio-group
             :model-value="layoutOrientation"
             size="small"
-            style="margin-right: 8px;"
+            style="margin-right: 12px;"
             @change="val => emit('update:layoutOrientation', val)"
           >
             <el-radio-button label="vertical">纵向吊线</el-radio-button>
             <el-radio-button label="horizontal">横向长卷</el-radio-button>
           </el-radio-group>
+          <el-checkbox
+            v-model="showBranchFrames"
+            size="small"
+            style="margin-right: 12px;"
+          >显示分支底框</el-checkbox>
           <el-button size="small" @click="expandAll">全部展开</el-button>
           <el-button size="small" @click="collapseToMainLine">只看主线</el-button>
           <el-button size="small" @click="expandToGeneration(3)">展开到三世</el-button>
@@ -234,6 +239,7 @@ const searchKeyword = ref('')
 const branchFilter = ref('all')
 const localFocusMemberId = ref(null)
 const generationLimit = ref('5')
+const showBranchFrames = ref(false)
 
 
 const branchPalette = computed(() => {
@@ -243,7 +249,36 @@ const branchPalette = computed(() => {
 })
 
 const innerNodes = computed({
-  get: () => props.nodes,
+  get: () => {
+    let nodes = props.nodes || []
+    if (!showBranchFrames.value) {
+      nodes = nodes.filter(node => node.type !== 'group')
+    }
+    const keyword = normalizeText(searchKeyword.value).toLowerCase()
+    if (!keyword) return nodes
+
+    return nodes.map(node => {
+      if (node.type !== 'person') return node
+      const data = node.data || {}
+      const searchHaystack = [
+        data.name,
+        data.branchLabel,
+        data.generationName,
+        data.spouse,
+        data.born,
+        data.died
+      ].filter(Boolean).join(' ').toLowerCase()
+      const matches = searchHaystack.includes(keyword)
+      return {
+        ...node,
+        class: `${node.class || ''} ${matches ? 'matches-search' : 'dimmed'}`.trim(),
+        data: {
+          ...data,
+          matchesSearch: matches
+        }
+      }
+    })
+  },
   set: () => {}
 })
 const innerEdges = computed({
@@ -1567,5 +1602,25 @@ watch(readerItems, (items) => {
   background:
     linear-gradient(180deg, rgba(139,69,19,.045) 0 1px, transparent 1px) 0 0 / 100% 260px,
     linear-gradient(180deg, color-mix(in srgb, var(--card-bg) 95%, #fff), var(--card-bg));
+}
+
+/* 关系图搜索高亮与灰度暗化样式 */
+.lineage-node-card.dimmed {
+  opacity: 0.28;
+  filter: grayscale(40%);
+  transition: opacity 0.3s, filter 0.3s;
+}
+
+.lineage-node-card.matches-search {
+  outline: 3px solid #d3a26a !important;
+  outline-offset: 3px;
+  box-shadow: 0 0 16px rgba(211, 162, 106, 0.6) !important;
+  animation: search-glow 2.2s infinite alternate;
+  transition: all 0.3s;
+}
+
+@keyframes search-glow {
+  from { box-shadow: 0 0 8px rgba(211, 162, 106, 0.4); }
+  to { box-shadow: 0 0 20px rgba(211, 162, 106, 0.85); }
 }
 </style>
