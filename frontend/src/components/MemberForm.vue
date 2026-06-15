@@ -563,9 +563,10 @@ async function initBurialMap() {
       leafletMarker = null
     }
     leafletMap = L.map(mapEl.value).setView([lat, lng], mapSelectedLat.value && mapSelectedLng.value ? 15 : 11)
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
-      attribution: '&copy; OpenStreetMap contributors',
+    L.tileLayer('https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}', {
+      subdomains: ['1', '2', '3', '4'],
+      maxZoom: 18,
+      attribution: '&copy; 高德地图',
     }).addTo(leafletMap)
     leafletMap.on('click', async (event) => {
       await setMapSelection(event.latlng.lat, event.latlng.lng, '')
