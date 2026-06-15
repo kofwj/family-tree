@@ -665,6 +665,87 @@ HIGH_SENSITIVITY_ARCHIVE_FIELDS = {
 
 HIGH_SENSITIVITY_FIELDS = HIGH_SENSITIVITY_STRUCTURE_FIELDS | HIGH_SENSITIVITY_ARCHIVE_FIELDS
 
+def run_auto_organization(session: Session):
+    unorganized_family = session.exec(select(FamilyGroup).where(FamilyGroup.id == 1)).first()
+    m1 = session.get(Member, 1)
+    if unorganized_family and (unorganized_family.name == '陈氏宗族' or unorganized_family.surname == '陈') and m1 and m1.name == '王金龙':
+        # 1. Rename family 1 to 王氏家族
+        unorganized_family.name = '王氏家族'
+        unorganized_family.surname = '王'
+        unorganized_family.site_title = '王氏家族家谱'
+        unorganized_family.cover_kicker = 'WANG CLAN'
+        unorganized_family.subtitle = '王氏支系'
+        unorganized_family.root_member_id = 1
+        unorganized_family.is_primary = True
+        session.add(unorganized_family)
+        
+        # 2. Create the other 8 family groups
+        families = [
+            (2, "孙氏家族", "孙", "孙氏家族家谱", "SUN CLAN", "孙氏支系", 8),
+            (3, "顾氏家族", "顾", "顾氏家族家谱", "GU CLAN", "顾氏支系", 11),
+            (4, "曹氏家族", "曹", "曹氏家族家谱", "CAO CLAN", "曹氏支系", 14),
+            (5, "周氏家族", "周", "周氏家族家谱", "ZHOU CLAN", "周氏支系", 18),
+            (6, "季氏家族", "季", "季氏家族家谱", "JI CLAN", "季氏支系", 19),
+            (7, "成氏家族", "成", "成氏家族家谱", "CHENG CLAN", "成氏支系", 23),
+            (8, "洪氏家族", "洪", "洪氏家族家谱", "HONG CLAN", "洪氏支系", 30),
+            (9, "张氏家族", "张", "张氏家族家谱", "ZHANG CLAN", "张氏支系", 33)
+        ]
+        for fid, name, surname, title, kicker, subtitle, root_id in families:
+            existing = session.get(FamilyGroup, fid)
+            if not existing:
+                fg = FamilyGroup(
+                    id=fid,
+                    name=name,
+                    surname=surname,
+                    site_title=title,
+                    cover_kicker=kicker,
+                    subtitle=subtitle,
+                    root_member_id=root_id,
+                    is_primary=False,
+                    is_active=True,
+                    sort_order=0,
+                    primary_line='paternal'
+                )
+                session.add(fg)
+        
+        # 3. Update all 41 existing members' primary_family_id
+        member_primary_family = {
+            1: 1, 2: 1, 3: 1, 4: 1, 5: 1, 7: 1, 13: 1, 15: 1, 17: 1, 28: 1, 29: 1, 36: 1, 37: 1,
+            8: 2, 9: 2, 20: 2, 21: 2, 22: 2, 6: 2, 31: 2, 25: 2, 26: 2, 39: 2, 41: 2,
+            11: 3, 12: 3, 10: 3, 27: 3, 40: 3,
+            14: 4, 16: 4,
+            18: 5, 34: 5,
+            19: 6, 35: 6,
+            23: 7, 24: 7, 38: 7,
+            30: 8, 32: 8,
+            33: 9
+        }
+        for mid, fid in member_primary_family.items():
+            m = session.get(Member, mid)
+            if m:
+                m.primary_family_id = fid
+                session.add(m)
+                
+        # 4. Clear and recreate member family links
+        existing_links = session.exec(select(MemberFamilyLink)).all()
+        for link in existing_links:
+            session.delete(link)
+            
+        # Add primary links
+        for mid, fid in member_primary_family.items():
+            link = MemberFamilyLink(member_id=mid, family_id=fid, relation_type='primary', is_primary=True)
+            session.add(link)
+            
+        # Add secondary links
+        secondary_links = [
+            (6, 1), (10, 1), (14, 1), (18, 1), (19, 4), (23, 2), (27, 2), (30, 1), (33, 8), (36, 7), (41, 3)
+        ]
+        for mid, fid in secondary_links:
+            link = MemberFamilyLink(member_id=mid, family_id=fid, relation_type='secondary', is_primary=False)
+            session.add(link)
+            
+        session.commit()
+
 def init_db():
     SQLModel.metadata.create_all(engine)
     migrate_sqlite_member_columns()
@@ -673,6 +754,7 @@ def init_db():
     with Session(engine) as session:
         ensure_default_family_group(session)
         ensure_member_primary_family(session)
+        run_auto_organization(session)
         ensure_default_admin(session)
 
 def hash_password(password: str) -> str:
