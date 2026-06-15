@@ -12,7 +12,7 @@ def test_settings_requires_authentication(client):
 def test_public_settings_is_anonymous_and_allowlisted(client):
     response = client.get("/public-settings")
     assert response.status_code == 200
-    assert set(response.json()) == {"siteTitle", "familySurname", "subtitle", "coverKicker"}
+    assert set(response.json()) == {"siteTitle", "familySurname", "subtitle", "coverKicker", "treeDescription"}
 
 
 def test_member_photo_requires_member_visibility(client):

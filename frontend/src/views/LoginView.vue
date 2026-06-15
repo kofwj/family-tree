@@ -4,8 +4,8 @@
     <div class="login-ornament login-ornament-b"></div>
     <el-card class="login-card">
       <div class="login-hero">
-        <div class="brand-kicker">{{ settings.coverKicker }}</div>
-        <h2>{{ settings.siteTitle }}</h2>
+        <div class="brand-kicker">CLAN · GENEALOGY</div>
+        <h2>宗族家谱</h2>
         <p>{{ settings.subtitle }}</p>
         <p class="login-helper">登录后可查看家族世系、成员录与备份管理。</p>
       </div>
@@ -33,15 +33,15 @@ const form = ref({ username: '', password: '' })
 const loading = ref(false)
 const err = ref('')
 const settings = ref({
-  siteTitle: '陈氏宗族家谱',
   subtitle: '承先祖之德 · 启后世之贤',
-  coverKicker: 'CHEN CLAN · GENEALOGY',
 })
 
 onMounted(async () => {
   try {
     const { data } = await api.get('/public-settings')
-    settings.value = { ...settings.value, ...(data || {}) }
+    if (data?.subtitle) {
+      settings.value.subtitle = data.subtitle
+    }
   } catch {
     // ignore public settings failure and keep defaults
   }
