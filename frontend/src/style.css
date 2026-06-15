@@ -251,9 +251,6 @@ body {
   gap: 8px;
   justify-content: flex-end;
 }
-.workspace-topbar__actions .el-button {
-  border-radius: 999px;
-}
 
 .main-tabs { height: calc(100vh - 132px); }
 .main-tabs .el-tabs__content { height: calc(100% - 52px); overflow: auto; }

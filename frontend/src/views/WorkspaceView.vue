@@ -86,12 +86,8 @@
         </div>
 
         <div class="workspace-topbar__actions">
-          <el-tooltip content="刷新数据" placement="bottom">
-            <el-button type="primary" circle icon="Refresh" @click="loadAll" />
-          </el-tooltip>
-          <el-tooltip content="下载导入样表" placement="bottom" v-if="can('member.import')">
-            <el-button circle icon="Download" @click="downloadImportTemplate" />
-          </el-tooltip>
+          <el-button type="primary" :icon="Refresh" @click="loadAll">刷新</el-button>
+          <el-button :icon="Download" @click="downloadImportTemplate" v-if="can('member.import')">下载模板</el-button>
           <el-upload
             v-if="can('member.import')"
             :show-file-list="false"
@@ -99,16 +95,12 @@
             accept=".xlsx,.xls"
             :on-change="uploadMemberExcel"
           >
-            <el-tooltip content="上传成员表格" placement="bottom">
-              <el-button circle icon="Upload" />
-            </el-tooltip>
+            <el-button :icon="Upload">导入成员</el-button>
           </el-upload>
-          <el-tooltip content="手动备份" placement="bottom" v-if="can('backup.create')">
-            <el-button type="warning" circle icon="FolderOpened" @click="backup" />
-          </el-tooltip>
-          <el-tooltip :content="darkMode ? '切换浅色模式' : '切换深色模式'" placement="bottom">
-            <el-button circle :icon="darkMode ? 'Sunny' : 'Moon'" @click="toggleTheme" />
-          </el-tooltip>
+          <el-button type="warning" :icon="FolderOpened" @click="backup" v-if="can('backup.create')">手动备份</el-button>
+          <el-button :icon="darkMode ? Sunny : Moon" @click="toggleTheme">
+            {{ darkMode ? '浅色' : '深色' }}
+          </el-button>
           <el-button type="danger" @click="logout">退出</el-button>
         </div>
       </div>
@@ -247,6 +239,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
+import { Refresh, Download, Upload, FolderOpened, Sunny, Moon, OfficeBuilding, View, User, DataAnalysis } from '@element-plus/icons-vue'
 import api from '../api/client'
 import TreePanel from '../components/TreePanel.vue'
 import MembersPanel from '../components/MembersPanel.vue'
