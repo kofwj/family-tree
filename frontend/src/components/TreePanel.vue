@@ -12,7 +12,6 @@
       <div class="lineage-toolbar-v2__controls">
         <el-radio-group v-model="displayMode" size="small">
           <el-radio-button label="reader">族谱阅读</el-radio-button>
-          <el-radio-button label="focus">聚焦三代</el-radio-button>
           <el-radio-button label="flow">全景关系图</el-radio-button>
         </el-radio-group>
         <el-input
@@ -60,7 +59,7 @@
         </button>
       </aside>
 
-      <main v-if="displayMode === 'reader'" class="lineage-reader-main">
+      <main class="lineage-reader-main">
         <div class="reader-status-bar">
           <div>
             <b>族谱阅读模式</b>
@@ -117,72 +116,6 @@
         <el-empty v-else description="没有匹配的世系成员" />
       </main>
 
-      <main v-else class="lineage-focus-main">
-        <div class="reader-status-bar">
-          <div>
-            <b>聚焦三代关系</b>
-            <span>围绕当前成员展示父母、本人/配偶、子女，适合普通族人快速理解自己这一支。</span>
-          </div>
-          <el-tag type="warning" effect="plain">点击阅读模式中的成员可切换焦点</el-tag>
-        </div>
-
-        <div v-if="focusMember" class="focus-board">
-          <section class="focus-row ancestors">
-            <h4>上一代</h4>
-            <div class="focus-card-list">
-              <button v-for="person in focusParents" :key="person.id" class="focus-mini-card" type="button" @click="selectMember(person.id)">
-                <span>{{ relationLabel(person, 'parent') }}</span>
-                <b>{{ person.name }}</b>
-                <small>第{{ person.generation ?? '?' }}代 · {{ person.gender || '未知' }}</small>
-              </button>
-              <div v-if="!focusParents.length" class="focus-empty-card">未记录父母成员</div>
-            </div>
-          </section>
-
-          <section class="focus-row current">
-            <h4>当前成员</h4>
-            <div class="focus-current-card">
-              <div class="focus-current-avatar" :class="focusMember.gender === '女' ? 'female' : 'male'">{{ focusMember.name?.slice(0, 1) || '人' }}</div>
-              <div>
-                <span>第{{ focusMember.generation ?? '?' }}代</span>
-                <h3>{{ focusMember.name }}</h3>
-                <p>{{ focusMember.birthDate || '生年不详' }}<template v-if="focusMember.deathDate"> - {{ focusMember.deathDate }}</template></p>
-                <div class="focus-chip-row">
-                  <el-tag v-if="focusMember.branch" size="small" type="success" effect="plain">{{ focusMember.branch }}</el-tag>
-                  <el-tag v-if="focusMember.rankTitle" size="small" type="warning" effect="plain">{{ focusMember.rankTitle }}</el-tag>
-                  <el-tag size="small" effect="plain">{{ focusMember.privacyLabel || privacyLabel(focusMember.privacyLevel) }}</el-tag>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          <section class="focus-row spouses">
-            <h4>配偶</h4>
-            <div class="focus-card-list">
-              <button v-for="person in focusSpouses" :key="person.id || person.name" class="focus-mini-card" type="button" :disabled="!person.id" @click="person.id && selectMember(person.id)">
-                <span>配偶</span>
-                <b>{{ person.name }}</b>
-                <small>{{ person.id ? `第${person.generation ?? '?'}代 · ${person.gender || '未知'}` : '姓名记录，未建成员档案' }}</small>
-              </button>
-              <div v-if="!focusSpouses.length" class="focus-empty-card">未记录配偶</div>
-            </div>
-          </section>
-
-          <section class="focus-row children">
-            <h4>下一代</h4>
-            <div class="focus-card-list children-list">
-              <button v-for="person in focusChildren" :key="person.id" class="focus-mini-card" type="button" @click="selectMember(person.id)">
-                <span>子女</span>
-                <b>{{ person.name }}</b>
-                <small>第{{ person.generation ?? '?' }}代 · {{ person.gender || '未知' }}</small>
-              </button>
-              <div v-if="!focusChildren.length" class="focus-empty-card">暂未识别到子女成员</div>
-            </div>
-          </section>
-        </div>
-        <el-empty v-else description="请先在族谱阅读模式中选择一个成员" />
-      </main>
-
       <aside class="lineage-focus-sidebar">
         <div class="sidebar-title">当前成员摘要</div>
         <div v-if="summaryMember" class="summary-member-card">
@@ -197,7 +130,6 @@
           </div>
           <div class="summary-actions">
             <el-button type="primary" size="small" @click="selectMember(summaryMember.id)">查看档案</el-button>
-            <el-button size="small" @click="displayMode = 'focus'">聚焦三代</el-button>
           </div>
         </div>
         <el-empty v-else description="点击成员卡查看摘要" />
@@ -302,7 +234,7 @@ const innerEdges = computed({
   set: () => {}
 })
 
-const modeLabel = computed(() => ({ reader: '族谱阅读', focus: '聚焦三代', flow: '全景关系图' }[displayMode.value] || '族谱阅读'))
+const modeLabel = computed(() => ({ reader: '族谱阅读', flow: '全景关系图' }[displayMode.value] || '族谱阅读'))
 const memberCount = computed(() => (props.members || []).length || readerItems.value.length)
 const generationCount = computed(() => new Set((readerItems.value || []).map(item => item.generation).filter(g => g !== null && g !== undefined)).size)
 const currentFocusMemberId = computed(() => localFocusMemberId.value ?? props.activeMemberId)
@@ -775,12 +707,6 @@ function getMember(id) {
   return n === null ? null : memberById.value.get(n) || null
 }
 
-const focusParents = computed(() => {
-  const m = focusMember.value
-  if (!m) return []
-  return relationParentIds(m).map(getMember).filter(Boolean)
-})
-
 const focusSpouses = computed(() => {
   const m = focusMember.value
   if (!m) return []
@@ -823,11 +749,6 @@ const focusChildren = computed(() => {
 })
 
 const summarySpouseText = computed(() => focusSpouses.value.map(sp => sp.name).filter(Boolean).join('、'))
-
-function relationLabel(person, type) {
-  if (type === 'parent') return person?.gender === '女' ? '母亲' : '父亲'
-  return ''
-}
 
 function setLocalFocus(id) {
   const n = toNumber(id)

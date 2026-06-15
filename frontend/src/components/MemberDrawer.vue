@@ -133,59 +133,85 @@
           <span>四、亲属关系</span>
           <small>Family</small>
         </div>
-        <div class="relation-cards relation-cards-rich">
-          <div class="relation-card">
-            <small>父亲</small>
-            <b>{{ display(fatherMember?.name) }}</b>
-            <div v-if="fatherMember" class="relation-actions-inline">
-              <el-button link type="primary" size="small" @click="jumpToMember(fatherMember.id)">查看档案</el-button>
+        <div class="mini-relation-tree">
+          <!-- 第一代：父母 -->
+          <div class="tree-tier tier-parents">
+            <div class="tree-node-wrapper">
+              <button v-if="fatherMember" class="mini-tree-node" type="button" @click="jumpToMember(fatherMember.id)">
+                <span class="node-relation">父亲</span>
+                <span class="node-name">{{ fatherMember.name }}</span>
+              </button>
+              <div v-else class="mini-tree-node empty">
+                <span class="node-relation">父亲</span>
+                <span class="node-name">未记录</span>
+              </div>
+            </div>
+            <div class="tree-node-wrapper">
+              <button v-if="motherMember" class="mini-tree-node" type="button" @click="jumpToMember(motherMember.id)">
+                <span class="node-relation">母亲</span>
+                <span class="node-name">{{ motherMember.name }}</span>
+              </button>
+              <div v-else class="mini-tree-node empty">
+                <span class="node-relation">母亲</span>
+                <span class="node-name">未记录</span>
+              </div>
             </div>
           </div>
-          <div class="relation-card">
-            <small>母亲</small>
-            <b>{{ display(motherMember?.name) }}</b>
-            <div v-if="motherMember" class="relation-actions-inline">
-              <el-button link type="primary" size="small" @click="jumpToMember(motherMember.id)">查看档案</el-button>
+
+          <!-- 代际垂直连接线 -->
+          <div class="tree-connector vertical"></div>
+
+          <!-- 第二代：当前成员及配偶 -->
+          <div class="tree-tier tier-current">
+            <div class="tree-node-wrapper active">
+              <div class="mini-tree-node current-node">
+                <span class="node-relation">当前成员</span>
+                <span class="node-name">{{ member.name }}</span>
+              </div>
+            </div>
+            
+            <!-- 配偶组 -->
+            <div class="spouses-group" v-if="spouseMembers.length">
+              <div class="tree-connector horizontal"></div>
+              <div class="spouse-nodes">
+                <button v-for="sp in spouseMembers" :key="sp.id" class="mini-tree-node spouse-node" type="button" @click="jumpToMember(sp.id)">
+                  <span class="node-relation">配偶</span>
+                  <span class="node-name">{{ sp.name }}</span>
+                </button>
+              </div>
+            </div>
+            <div class="spouses-group empty" v-else-if="member.spouse">
+              <div class="tree-connector horizontal"></div>
+              <div class="mini-tree-node spouse-node empty">
+                <span class="node-relation">配偶 (未建档)</span>
+                <span class="node-name">{{ member.spouse }}</span>
+              </div>
             </div>
           </div>
-          <div class="relation-card wide">
-            <small>配偶</small>
-            <div v-if="spouseMembers.length" class="relation-tag-list">
-              <el-button
-                v-for="sp in spouseMembers"
-                :key="sp.id"
-                size="small"
-                plain
-                round
-                class="relation-chip"
-                @click="jumpToMember(sp.id)"
-              >
-                {{ sp.name }}
-              </el-button>
+
+          <!-- 代际垂直连接线 -->
+          <div class="tree-connector vertical"></div>
+
+          <!-- 第三代：子女 -->
+          <div class="tree-tier tier-children">
+            <template v-if="childrenMembers.length">
+              <button v-for="child in childrenMembers" :key="child.id" class="mini-tree-node child-node" type="button" @click="jumpToMember(child.id)">
+                <span class="node-relation">子女</span>
+                <span class="node-name">{{ child.name }}</span>
+              </button>
+            </template>
+            <div v-else-if="member.childrenNote" class="mini-tree-node empty wide-node">
+              <span class="node-relation">子女备注</span>
+              <span class="node-name">{{ member.childrenNote }}</span>
             </div>
-            <b v-else>{{ display(spouseDisplay) }}</b>
-          </div>
-          <div class="relation-card wide">
-            <small>子女</small>
-            <div v-if="childrenMembers.length" class="relation-tag-list">
-              <el-button
-                v-for="child in childrenMembers"
-                :key="child.id"
-                size="small"
-                plain
-                round
-                class="relation-chip"
-                @click="jumpToMember(child.id)"
-              >
-                {{ child.name }}
-              </el-button>
+            <div v-else class="mini-tree-node empty">
+              <span class="node-relation">子女</span>
+              <span class="node-name">未记录</span>
             </div>
-            <b v-else>{{ display(member.childrenNote, '暂未识别到子女成员') }}</b>
           </div>
         </div>
-        <div v-if="member.childrenNote || member.marriageNote" class="archive-note-list">
-          <p v-if="member.childrenNote"><b>子女备注：</b>{{ member.childrenNote }}</p>
-          <p v-if="member.marriageNote"><b>婚配说明：</b>{{ member.marriageNote }}</p>
+        <div v-if="member.marriageNote" class="archive-note-list" style="margin-top: 10px;">
+          <p><b>婚配说明：</b>{{ member.marriageNote }}</p>
         </div>
       </section>
 
@@ -541,4 +567,142 @@ function jumpToMember(memberOrId) {
 .citation-form-source { min-width: 190px; flex: 1 1 190px; }
 .citation-form-field { width: 130px; }
 .citation-form-quote { min-width: 180px; flex: 1 1 180px; }
+
+/* 微型直系三代关系树样式 */
+.mini-relation-tree {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  background: color-mix(in srgb, var(--bg) 35%, transparent);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 20px;
+  margin-top: 10px;
+  box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.01);
+}
+
+.tree-tier {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 16px;
+  width: 100%;
+}
+
+.tier-parents {
+  margin-bottom: 2px;
+}
+
+.tier-current {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 24px;
+}
+
+.spouses-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.spouse-nodes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tier-children {
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 2px;
+}
+
+.mini-tree-node {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 130px;
+  height: 52px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--card-bg);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: inherit;
+  text-align: center;
+  box-shadow: 0 2px 4px rgba(62, 44, 28, 0.04);
+}
+
+.mini-tree-node:hover:not(.empty) {
+  transform: translateY(-1px);
+  border-color: var(--primary);
+  box-shadow: 0 4px 8px rgba(139, 69, 19, 0.12);
+}
+
+.mini-tree-node.empty {
+  cursor: default;
+  background: color-mix(in srgb, var(--bg) 50%, transparent);
+  border-style: dashed;
+  box-shadow: none;
+}
+
+.mini-tree-node.empty .node-name {
+  color: var(--text-secondary);
+  font-style: italic;
+  font-weight: normal;
+}
+
+.current-node {
+  border: 2px solid var(--primary);
+  background: color-mix(in srgb, var(--primary) 8%, var(--card-bg));
+  cursor: default;
+}
+
+.node-relation {
+  font-size: 10px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  margin-bottom: 2px;
+}
+
+.node-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-main);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  width: 100%;
+}
+
+.current-node .node-name {
+  color: var(--primary);
+}
+
+/* 连接线 */
+.tree-connector.vertical {
+  width: 2px;
+  height: 14px;
+  background-color: var(--border);
+}
+
+.tree-connector.horizontal {
+  width: 16px;
+  height: 2px;
+  background-color: var(--border);
+}
+
+/* 当配偶节点为空或特殊节点时的样式 */
+.spouses-group.empty .mini-tree-node.empty {
+  width: 100px;
+}
+
+.wide-node {
+  width: 260px;
+}
 </style>
