@@ -453,7 +453,7 @@ watch(() => form.value.birthDate, (newVal) => {
         try {
           const lunar = solarLunar.solar2lunar(y, m, d)
           if (lunar && lunar.gzYear) {
-            form.value.birthLunarDate = `农历${lunar.gzYear}年${lunar.IMonthCn}${lunar.IDayCn}`
+            form.value.birthLunarDate = `农历${lunar.gzYear}年${lunar.monthCn}${lunar.dayCn}`
             form.value.birthIsLeapMonth = !!lunar.isLeap
           }
         } catch (e) {
@@ -477,7 +477,7 @@ watch(() => form.value.deathDate, (newVal) => {
         try {
           const lunar = solarLunar.solar2lunar(y, m, d)
           if (lunar && lunar.gzYear) {
-            form.value.deathLunarDate = `农历${lunar.gzYear}年${lunar.IMonthCn}${lunar.IDayCn}`
+            form.value.deathLunarDate = `农历${lunar.gzYear}年${lunar.monthCn}${lunar.dayCn}`
             form.value.deathIsLeapMonth = !!lunar.isLeap
           }
         } catch (e) {
