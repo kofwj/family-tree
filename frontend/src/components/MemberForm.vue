@@ -267,9 +267,13 @@
 
     <el-dialog v-model="mapPickerVisible" title="选择安葬地图定位" width="860px" append-to-body destroy-on-close @opened="initBurialMap">
       <div class="map-picker-toolbar">
-        <el-input v-model="mapSearchKeyword" placeholder="输入墓址/公墓/村镇搜索，例如：如东三桥村" clearable @keyup.enter="searchBurialPlace" />
+        <el-input v-model="mapSearchKeyword" placeholder="输入墓址/公墓/村镇搜索，例如：如东三桥村" clearable @keyup.enter="searchBurialPlace" style="width: 280px;" />
         <el-button type="primary" :loading="mapSearching" @click="searchBurialPlace">搜索定位</el-button>
         <el-button @click="useBrowserLocation">用当前位置</el-button>
+        <el-radio-group v-model="mapSource" size="small" @change="switchMapSource" style="margin-left: auto;">
+          <el-radio-button label="gaode">高德地图</el-radio-button>
+          <el-radio-button label="osm">OSM 地图</el-radio-button>
+        </el-radio-group>
       </div>
       <div class="map-picker-tip">可搜索后在地图上点击精确位置；保存后会同时写入安葬地址、纬度、经度。</div>
       <div ref="mapEl" class="map-picker-canvas"></div>
@@ -525,9 +529,11 @@ const mapSearching = ref(false)
 const mapSelectedAddress = ref('')
 const mapSelectedLat = ref(null)
 const mapSelectedLng = ref(null)
+const mapSource = ref('gaode')
 let leafletPromise = null
 let leafletMap = null
 let leafletMarker = null
+let currentTileLayer = null
 
 function hasWindow() {
   return typeof window !== 'undefined' && typeof document !== 'undefined'
@@ -541,6 +547,50 @@ function openBurialMapPicker() {
   mapPickerVisible.value = true
 }
 
+function addTileLayer() {
+  if (!leafletMap || !L) return
+  if (currentTileLayer) {
+    leafletMap.removeLayer(currentTileLayer)
+  }
+  
+  let url = ''
+  let options = {}
+  
+  if (mapSource.value === 'gaode') {
+    url = 'https://wprd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scl=1&style=7&x={x}&y={y}&z={z}'
+    options = {
+      subdomains: ['1', '2', '3', '4'],
+      maxZoom: 18,
+      attribution: '&copy; 高德地图'
+    }
+  } else {
+    url = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
+    options = {
+      subdomains: ['a', 'b', 'c'],
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap'
+    }
+  }
+  
+  currentTileLayer = L.tileLayer(url, options)
+  
+  // Debug listeners
+  currentTileLayer.on('tileload', (e) => {
+    console.log(`[Map Debug] Tile load success: ${e.url}`)
+  })
+  currentTileLayer.on('tileerror', (e) => {
+    console.error(`[Map Debug] Tile load failed: ${e.url}`, e)
+  })
+  
+  currentTileLayer.addTo(leafletMap)
+}
+
+function switchMapSource() {
+  if (leafletMap) {
+    addTileLayer()
+  }
+}
+
 async function initBurialMap() {
   try {
     await nextTick()
@@ -550,13 +600,10 @@ async function initBurialMap() {
       leafletMap.remove()
       leafletMap = null
       leafletMarker = null
+      currentTileLayer = null
     }
     leafletMap = L.map(mapEl.value).setView([lat, lng], mapSelectedLat.value && mapSelectedLng.value ? 15 : 11)
-    L.tileLayer('https://wprd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scl=1&style=7&x={x}&y={y}&z={z}', {
-      subdomains: ['1', '2', '3', '4'],
-      maxZoom: 18,
-      attribution: '&copy; 高德地图',
-    }).addTo(leafletMap)
+    addTileLayer()
     
     leafletMap.on('click', async (event) => {
       await setMapSelection(event.latlng.lat, event.latlng.lng, '')
