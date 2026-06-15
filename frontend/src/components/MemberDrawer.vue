@@ -435,9 +435,11 @@ const sourceFormatHint = computed(() => '来源类型｜提供人/载体｜时�
 const burialMapUrl = computed(() => {
   const lat = props.member?.burialLat
   const lng = props.member?.burialLng
-  if (lat && lng) return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${lat},${lng}`)}`
   const place = String(props.member?.burialPlace || '').trim()
-  return place ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(place)}` : ''
+  if (lat && lng) {
+    return `https://uri.amap.com/marker?position=${lng},${lat}&name=${encodeURIComponent(place || '安葬地')}`
+  }
+  return place ? `https://uri.amap.com/search?keyword=${encodeURIComponent(place)}` : ''
 })
 
 const showMigration = computed(() => {
