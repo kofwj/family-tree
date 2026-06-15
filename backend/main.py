@@ -666,31 +666,33 @@ HIGH_SENSITIVITY_ARCHIVE_FIELDS = {
 HIGH_SENSITIVITY_FIELDS = HIGH_SENSITIVITY_STRUCTURE_FIELDS | HIGH_SENSITIVITY_ARCHIVE_FIELDS
 
 def run_auto_organization(session: Session):
-    unorganized_family = session.exec(select(FamilyGroup).where(FamilyGroup.id == 1)).first()
-    m1 = session.get(Member, 1)
-    if unorganized_family and (unorganized_family.name == '陈氏宗族' or unorganized_family.surname == '陈') and m1 and m1.name == '王金龙':
+    # Check if database has members and is not yet organized
+    link_count = len(session.exec(select(MemberFamilyLink)).all())
+    members = session.exec(select(Member)).all()
+    if len(members) > 0 and link_count < 10:
         # 1. Rename family 1 to 王氏家族
-        unorganized_family.name = '王氏家族'
-        unorganized_family.surname = '王'
-        unorganized_family.site_title = '王氏家族家谱'
-        unorganized_family.cover_kicker = 'WANG CLAN'
-        unorganized_family.subtitle = '王氏支系'
-        unorganized_family.root_member_id = 1
-        unorganized_family.is_primary = True
-        session.add(unorganized_family)
+        unorganized_family = session.exec(select(FamilyGroup).where(FamilyGroup.id == 1)).first()
+        if unorganized_family:
+            unorganized_family.name = '王氏家族'
+            unorganized_family.surname = '王'
+            unorganized_family.site_title = '王氏家族家谱'
+            unorganized_family.cover_kicker = 'WANG CLAN'
+            unorganized_family.subtitle = '王氏支系'
+            unorganized_family.is_primary = True
+            session.add(unorganized_family)
         
-        # 2. Create the other 8 family groups
+        # 2. Create the other 8 family groups if they don't exist
         families = [
-            (2, "孙氏家族", "孙", "孙氏家族家谱", "SUN CLAN", "孙氏支系", 8),
-            (3, "顾氏家族", "顾", "顾氏家族家谱", "GU CLAN", "顾氏支系", 11),
-            (4, "曹氏家族", "曹", "曹氏家族家谱", "CAO CLAN", "曹氏支系", 14),
-            (5, "周氏家族", "周", "周氏家族家谱", "ZHOU CLAN", "周氏支系", 18),
-            (6, "季氏家族", "季", "季氏家族家谱", "JI CLAN", "季氏支系", 19),
-            (7, "成氏家族", "成", "成氏家族家谱", "CHENG CLAN", "成氏支系", 23),
-            (8, "洪氏家族", "洪", "洪氏家族家谱", "HONG CLAN", "洪氏支系", 30),
-            (9, "张氏家族", "张", "张氏家族家谱", "ZHANG CLAN", "张氏支系", 33)
+            (2, "孙氏家族", "孙", "孙氏家族家谱", "SUN CLAN", "孙氏支系"),
+            (3, "顾氏家族", "顾", "顾氏家族家谱", "GU CLAN", "顾氏支系"),
+            (4, "曹氏家族", "曹", "曹氏家族家谱", "CAO CLAN", "曹氏支系"),
+            (5, "周氏家族", "周", "周氏家族家谱", "ZHOU CLAN", "周氏支系"),
+            (6, "季氏家族", "季", "季氏家族家谱", "JI CLAN", "季氏支系"),
+            (7, "成氏家族", "成", "成氏家族家谱", "CHENG CLAN", "成氏支系"),
+            (8, "洪氏家族", "洪", "洪氏家族家谱", "HONG CLAN", "洪氏支系"),
+            (9, "张氏家族", "张", "张氏家族家谱", "ZHANG CLAN", "张氏支系")
         ]
-        for fid, name, surname, title, kicker, subtitle, root_id in families:
+        for fid, name, surname, title, kicker, subtitle in families:
             existing = session.get(FamilyGroup, fid)
             if not existing:
                 fg = FamilyGroup(
@@ -700,50 +702,83 @@ def run_auto_organization(session: Session):
                     site_title=title,
                     cover_kicker=kicker,
                     subtitle=subtitle,
-                    root_member_id=root_id,
                     is_primary=False,
                     is_active=True,
                     sort_order=0,
                     primary_line='paternal'
                 )
                 session.add(fg)
+        session.commit()
         
-        # 3. Update all 41 existing members' primary_family_id
-        member_primary_family = {
-            1: 1, 2: 1, 3: 1, 4: 1, 5: 1, 7: 1, 13: 1, 15: 1, 17: 1, 28: 1, 29: 1, 36: 1, 37: 1,
-            8: 2, 9: 2, 20: 2, 21: 2, 22: 2, 6: 2, 31: 2, 25: 2, 26: 2, 39: 2, 41: 2,
-            11: 3, 12: 3, 10: 3, 27: 3, 40: 3,
-            14: 4, 16: 4,
-            18: 5, 34: 5,
-            19: 6, 35: 6,
-            23: 7, 24: 7, 38: 7,
-            30: 8, 32: 8,
-            33: 9
+        # Reload members and build name-to-member mapping
+        members = session.exec(select(Member)).all()
+        name_to_member = {m.name: m for m in members if m.name}
+        
+        # Update root member IDs dynamically by name
+        family_roots = {
+            1: "王金龙",
+            2: "孙怀志",
+            3: "顾伦如",
+            4: "曹福彬",
+            5: "周宇飞",
+            6: "季小磊",
+            7: "成德泉",
+            8: "洪建国",
+            9: "张佳杰"
         }
-        for mid, fid in member_primary_family.items():
-            m = session.get(Member, mid)
-            if m:
-                m.primary_family_id = fid
-                session.add(m)
+        for fid, root_name in family_roots.items():
+            fg = session.get(FamilyGroup, fid)
+            rm = name_to_member.get(root_name)
+            if fg and rm:
+                fg.root_member_id = rm.id
+                session.add(fg)
                 
-        # 4. Clear and recreate member family links
+        # 3. Define name-based primary family mapping
+        member_name_primary_family = {
+            # 王氏家族 (1)
+            "王金龙": 1, "王文华": 1, "王万云": 1, "王文莲": 1, "王文忠": 1, "王健": 1, "王忆涵": 1, "王小琴": 1, "吕永芳": 1, "阿姨": 1, "徐压美": 1, "王俊": 1, "王嘉诚": 1,
+            # 孙氏家族 (2)
+            "孙怀志": 2, "张圣莲": 2, "孙永祥": 2, "孙永军": 2, "孙永珍": 2, "孙永芳": 2, "孙小雪": 2, "王建兰": 2, "孙金苏": 2, "邱静雯": 2, "孙建": 2,
+            # 顾氏家族 (3)
+            "顾伦如": 3, "陈秀英": 3, "顾福梅": 3, "顾亚红": 3, "顾天文": 3,
+            # 曹氏家族 (4)
+            "曹福彬": 4, "曹晓慧": 4,
+            # 周氏家族 (5)
+            "周宇飞": 5, "周欣榕": 5,
+            # 季氏家族 (6)
+            "季小磊": 6, "季梓琪": 6,
+            # 成氏家族 (7)
+            "成德泉": 7, "成小青": 7, "成博瑞": 7,
+            # 洪氏家族 (8)
+            "洪建国": 8, "洪燕": 8,
+            # 张氏家族 (9)
+            "张佳杰": 9
+        }
+        
+        # 4. Clear existing links
         existing_links = session.exec(select(MemberFamilyLink)).all()
         for link in existing_links:
             session.delete(link)
             
-        # Add primary links
-        for mid, fid in member_primary_family.items():
-            link = MemberFamilyLink(member_id=mid, family_id=fid, relation_type='primary', is_primary=True)
-            session.add(link)
-            
-        # Add secondary links
+        # 5. Set primary_family_id and insert primary family links
+        for name, fid in member_name_primary_family.items():
+            m = name_to_member.get(name)
+            if m:
+                m.primary_family_id = fid
+                session.add(m)
+                link = MemberFamilyLink(member_id=m.id, family_id=fid, relation_type='primary', is_primary=True)
+                session.add(link)
+                
+        # 6. Insert secondary links (spouses marrying into other families)
         secondary_links = [
-            (6, 1), (10, 1), (14, 1), (18, 1), (19, 4), (23, 2), (27, 2), (30, 1), (33, 8), (36, 7), (41, 3)
+            ("孙永芳", 1), ("顾福梅", 1), ("曹福彬", 1), ("周宇飞", 1), ("季小磊", 4), ("成德泉", 2), ("顾亚红", 2), ("洪建国", 1), ("张佳杰", 8), ("王俊", 7), ("孙建", 3)
         ]
-        for mid, fid in secondary_links:
-            link = MemberFamilyLink(member_id=mid, family_id=fid, relation_type='secondary', is_primary=False)
-            session.add(link)
-            
+        for name, fid in secondary_links:
+            m = name_to_member.get(name)
+            if m:
+                link = MemberFamilyLink(member_id=m.id, family_id=fid, relation_type='secondary', is_primary=False)
+                session.add(link)
+                
         session.commit()
 
 def init_db():
