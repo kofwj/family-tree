@@ -30,7 +30,8 @@
 
       <div class="tree-toolbar__actions">
         <template v-if="displayMode === 'flow'">
-          <el-button size="small" @click="resetSunburstZoom">返回始祖</el-button>
+          <el-button size="small" :disabled="centerHistoryStack.length === 0" @click="goBackCenter">返回上级</el-button>
+          <el-button size="small" @click="resetToAncestor">返回始祖</el-button>
           <el-button size="small" type="primary" plain @click="resetSunburstView">重置视图</el-button>
         </template>
         <template v-else>
@@ -164,6 +165,8 @@ const searchKeyword = ref('')
 const branchFilter = ref('all')
 const localFocusMemberId = ref(null)
 const generationLimit = ref('5')
+const currentCenterMemberId = ref(null)
+const centerHistoryStack = ref([])
 
 const chartRef = ref(null)
 let chartInstance = null
@@ -185,8 +188,28 @@ function initChart() {
   
   chartInstance.on('click', (params) => {
     if (params.data && params.data.id) {
-      setLocalFocus(params.data.id)
-      emit('node-click', params.data.id)
+      let id = String(params.data.id)
+      if (id.startsWith('shortcut-')) {
+        const parts = id.split('-')
+        id = parts[parts.length - 1]
+      }
+      if (!id.includes('midpoint')) {
+        setLocalFocus(id)
+        emit('node-click', id)
+      }
+    }
+  })
+
+  chartInstance.on('dblclick', (params) => {
+    if (params.data && params.data.id) {
+      let id = String(params.data.id)
+      if (id.startsWith('shortcut-')) {
+        const parts = id.split('-')
+        id = parts[parts.length - 1]
+      }
+      if (!id.includes('midpoint')) {
+        setCenterMember(id)
+      }
     }
   })
 }
@@ -256,106 +279,520 @@ function filterSunburstNode(node, isSearchActive, keyword) {
   }
 }
 
-function getProcessedSunburstData() {
-  const roots = [...(props.tree || [])].sort(sortByGenealogy)
-  const maxDepth = generationLimit.value === 'all' ? Infinity : Number(generationLimit.value)
-  
-  const rootsMinGen = roots.length ? Math.min(...roots.map(root => {
-    const gen = root?.generation ?? root?.generationNo;
-    return gen !== null && gen !== undefined ? Number(gen) : 1;
-  })) : 1
-  const branchGen = rootsMinGen <= 1 ? 2 : rootsMinGen + 1
-  
-  const palette = branchPalette.value
-  const majorBranchIndexMap = new Map()
-  const familySurname = getFamilySurname(props.familyName)
-  const familyBaseHue = getBaseHueForSurname(familySurname)
-  
-  function getBranchColor(node, branchNode, rootIndex, gen) {
-    if (!branchNode) {
-      return { H: familyBaseHue, S: 16, L: 60 }
+function getBirthYear(m) {
+  const dateStr = m.birthDate || m.birthLunarDate || m.birthDateText || ''
+  const match = dateStr.match(/(\d{4})/)
+  if (match) return Number(match[1])
+  return null
+}
+
+function buildRelationGraph(members) {
+  const graph = new Map() // memberId -> Set of neighborIds
+  const memberById = new Map()
+  for (const m of members) {
+    const mid = Number(m.id)
+    memberById.set(mid, m)
+    if (!graph.has(mid)) {
+      graph.set(mid, new Set())
     }
-    const key = nodeKey(branchNode)
-    if (!majorBranchIndexMap.has(key)) {
-      majorBranchIndexMap.set(key, majorBranchIndexMap.size)
-    }
-    const index = majorBranchIndexMap.get(key)
-    const hslStr = palette[index % palette.length]
-    const match = hslStr.match(/hsl\((\d+),\s*(\d+)%,\s*(\d+)%\)/)
-    if (match) {
-      return {
-        H: Number(match[1]),
-        S: Number(match[2]),
-        L: Number(match[3])
-      }
-    }
-    return { H: familyBaseHue, S: 80, L: 45 }
   }
-  
-  function convertNode(node, depth, parentBranchNode, rootIndex) {
-    const id = nodeKey(node)
-    const gen = node.generation ?? depth
-    
-    let currentBranchNode = parentBranchNode
-    if (gen === branchGen) {
-      currentBranchNode = node
+
+  function addEdge(id1, id2) {
+    id1 = Number(id1)
+    id2 = Number(id2)
+    if (id1 === id2) return
+    if (graph.has(id1) && graph.has(id2)) {
+      graph.get(id1).add(id2)
+      graph.get(id2).add(id1)
     }
-    
-    const branchColorInfo = getBranchColor(node, currentBranchNode, rootIndex, gen)
-    const depthDiff = Math.max(0, gen - rootsMinGen)
-    const hue = branchColorInfo.H
-    const sat = Math.max(30, branchColorInfo.S - depthDiff * 7)
-    const light = Math.min(85, branchColorInfo.L + depthDiff * 6)
-    const color = `hsl(${hue}, ${sat}%, ${light}%)`
-    
-    const children = []
-    if (depth < maxDepth && node.children && node.children.length) {
-      const sortedChildren = [...node.children].sort(sortByGenealogy)
-      for (const child of sortedChildren) {
-        children.push(convertNode(child, depth + 1, currentBranchNode, rootIndex))
+  }
+
+  // Add spouse and parent edges
+  for (const m of members) {
+    const mid = Number(m.id)
+    if (m.fatherId) addEdge(mid, m.fatherId)
+    if (m.motherId) addEdge(mid, m.motherId)
+    if (Array.isArray(m.spouseIds)) {
+      for (const sid of m.spouseIds) {
+        addEdge(mid, sid)
       }
     }
+  }
+
+  // Add sibling edges (sharing same father or mother)
+  for (let i = 0; i < members.length; i++) {
+    for (let j = i + 1; j < members.length; j++) {
+      const m1 = members[i]
+      const m2 = members[j]
+      const isSibling = (m1.fatherId && m1.fatherId === m2.fatherId) || 
+                        (m1.motherId && m1.motherId === m2.motherId)
+      if (isSibling) {
+        addEdge(Number(m1.id), Number(m2.id))
+      }
+    }
+  }
+
+  return { graph, memberById }
+}
+
+function findDefaultCenterMember() {
+  if (!props.members || props.members.length === 0) return null
+  let lowestGen = Infinity
+  let candidates = []
+  for (const m of props.members) {
+    const g = m.generation ?? m.generationNo
+    if (g !== null && g !== undefined) {
+      const genNum = Number(g)
+      if (genNum < lowestGen) {
+        lowestGen = genNum
+        candidates = [m]
+      } else if (genNum === lowestGen) {
+        candidates.push(m)
+      }
+    }
+  }
+  if (candidates.length === 0) return props.members[0].id
+  const rootCand = candidates.find(c => !c.fatherId && !c.motherId) || candidates[0]
+  return rootCand.id
+}
+
+function computeLayout(members, centerId) {
+  const { graph, memberById } = buildRelationGraph(members)
+  
+  if (!graph.has(centerId)) {
+    return { nodes: [], links: [], maxDistance: 1 }
+  }
+
+  // BFS to assign distances and build spanning tree
+  const distance = new Map() // memberId -> distance (0, 1, 2...)
+  const bfsParent = new Map() // memberId -> parentId in tree
+  const bfsChildren = new Map() // memberId -> list of childIds in tree
+  
+  for (const mid of graph.keys()) {
+    bfsChildren.set(mid, [])
+  }
+
+  const queue = [centerId]
+  distance.set(centerId, 0)
+  const visited = new Set([centerId])
+
+  while (queue.length > 0) {
+    const curr = queue.shift()
+    const dist = distance.get(curr)
     
-    const spouseNames = (node.spouses || []).map(s => s.name).filter(Boolean).join('、') || node.spouse || ''
-    const displayName = spouseNames ? `${node.name}\n(配:${spouseNames.split('、')[0]})` : node.name
+    const neighbors = Array.from(graph.get(curr) || [])
     
-    return {
-      id: id,
-      name: displayName,
-      value: 1,
-      children: children.length ? children : undefined,
+    if (dist === 0) {
+      const currMember = memberById.get(curr)
+      neighbors.sort((a, b) => {
+        const mA = memberById.get(a)
+        const mB = memberById.get(b)
+        
+        function getCategoryScore(m) {
+          if (!m) return 99
+          const isParent = m.id === currMember.fatherId || m.id === currMember.motherId
+          if (isParent) return 1 // Parents first (top)
+          const isSpouse = Array.isArray(currMember.spouseIds) && currMember.spouseIds.includes(m.id)
+          if (isSpouse) return 2 // Spouses second (sides)
+          const isSibling = (m.fatherId && m.fatherId === currMember.fatherId) || 
+                            (m.motherId && m.motherId === currMember.motherId)
+          if (isSibling) return 3 // Siblings third (side-bottom)
+          const isChild = m.fatherId === currMember.id || m.motherId === currMember.id
+          if (isChild) return 4 // Children fourth (bottom)
+          return 5
+        }
+        return getCategoryScore(mA) - getCategoryScore(mB)
+      })
+    } else {
+      neighbors.sort((a, b) => {
+        const mA = memberById.get(a)
+        const mB = memberById.get(b)
+        const genA = mA?.generation ?? 999
+        const genB = mB?.generation ?? 999
+        return genB - genA
+      })
+    }
+
+    for (const n of neighbors) {
+      if (!visited.has(n)) {
+        visited.add(n)
+        distance.set(n, dist + 1)
+        bfsParent.set(n, curr)
+        bfsChildren.get(curr).push(n)
+        queue.push(n)
+      }
+    }
+  }
+
+  // Ring intervals
+  const RingWidth = 120
+  
+  // Coordinates mapping in polar: memberId -> { r, thetaDegrees }
+  const coords = new Map()
+
+  // Root is at center
+  coords.set(centerId, { r: 0, thetaDegrees: 0 })
+
+  // Children of root
+  const rootChildren = bfsChildren.get(centerId) || []
+  const rootMember = memberById.get(centerId)
+  
+  // Helper to determine sector assignment in radians
+  function getSectorRange(m) {
+    if (!m) return [0, 2 * Math.PI]
+    const isParent = m.id === rootMember.fatherId || m.id === rootMember.motherId
+    if (isParent) return [Math.PI / 3, 2 * Math.PI / 3] // 60 to 120 deg (top)
+    
+    const isSpouse = Array.isArray(rootMember.spouseIds) && rootMember.spouseIds.includes(m.id)
+    if (isSpouse) return [-Math.PI / 6, Math.PI / 4] // -30 to 45 deg (right)
+    
+    const isSibling = (m.fatherId && m.fatherId === rootMember.fatherId) || 
+                      (m.motherId && m.motherId === rootMember.motherId)
+    if (isSibling) return [Math.PI, 5 * Math.PI / 4] // 180 to 225 deg (left-bottom)
+    
+    const isChild = m.fatherId === rootMember.id || m.motherId === rootMember.id
+    if (isChild) return [4 * Math.PI / 3, 11 * Math.PI / 6] // 240 to 330 deg (bottom)
+    
+    return [Math.PI / 4, Math.PI / 3]
+  }
+
+  // Assign angles recursively
+  for (const childId of rootChildren) {
+    const child = memberById.get(childId)
+    const range = getSectorRange(child)
+    assignAngles(childId, range[0], range[1], RingWidth)
+  }
+
+  function assignAngles(nodeId, thetaMin, thetaMax, r) {
+    const theta = (thetaMin + thetaMax) / 2
+    const thetaDegrees = theta * 180 / Math.PI
+    coords.set(nodeId, { r, thetaDegrees })
+
+    const children = bfsChildren.get(nodeId) || []
+    if (children.length === 0) return
+
+    const span = thetaMax - thetaMin
+    const step = span / children.length
+    
+    const childrenMembers = children.map(cid => memberById.get(cid))
+    childrenMembers.sort((a, b) => {
+      const birthA = a.birthDate || a.birthDateText || ''
+      const birthB = b.birthDate || b.birthDateText || ''
+      return birthA.localeCompare(birthB)
+    })
+    
+    let currentThetaMin = thetaMin
+    for (let i = 0; i < childrenMembers.length; i++) {
+      const child = childrenMembers[i]
+      
+      let isTwin = false
+      if (i < childrenMembers.length - 1) {
+        const nextChild = childrenMembers[i + 1]
+        const date1 = child.birthDate || child.birthDateText
+        const date2 = nextChild.birthDate || nextChild.birthDateText
+        if (date1 && date1 === date2 && child.fatherId === nextChild.fatherId && child.motherId === nextChild.motherId) {
+          isTwin = true
+        }
+      }
+      
+      if (isTwin) {
+        const twin1Id = child.id
+        const twin2Id = childrenMembers[i + 1].id
+        
+        const midTheta = currentThetaMin + step / 2
+        assignAngles(twin1Id, currentThetaMin, midTheta, r + RingWidth)
+        assignAngles(twin2Id, midTheta, currentThetaMin + step, r + RingWidth)
+        
+        i++
+        currentThetaMin += step
+      } else {
+        assignAngles(child.id, currentThetaMin, currentThetaMin + step, r + RingWidth)
+        currentThetaMin += step
+      }
+    }
+  }
+
+  // Formulate ECharts nodes and links
+  const echartsNodes = []
+  const echartsLinks = []
+  let maxDistance = 1
+
+  // Add all member nodes
+  for (const m of members) {
+    const mid = Number(m.id)
+    if (!coords.has(mid)) continue
+    
+    const { r, thetaDegrees } = coords.get(mid)
+    const dist = r / RingWidth
+    if (dist > maxDistance) maxDistance = dist
+    const isActive = mid === Number(currentCenterMemberId.value)
+    
+    const birthYear = getBirthYear(m)
+    let color = '#5cb8ff'
+    if (birthYear) {
+      if (birthYear >= 2000) color = '#ff85a2'
+      else if (birthYear >= 1970) color = '#ffbe5c'
+    } else {
+      color = '#e0e0e0'
+    }
+    
+    const isDeceased = !m.isLiving || m.deathDate || m.deathDateText
+    
+    echartsNodes.push({
+      id: String(mid),
+      name: m.name,
+      value: [r, thetaDegrees],
+      symbolSize: mid === centerId ? 42 : 30,
       itemStyle: {
         color: color,
-        borderColor: '#ffffff',
-        borderWidth: 1
+        borderColor: isActive ? '#c48b58' : (isDeceased ? '#666666' : '#ffffff'),
+        borderWidth: isActive ? 3 : (isDeceased ? 2 : 1.5),
+        shadowColor: isActive ? '#c48b58' : 'rgba(0,0,0,0.15)',
+        shadowBlur: isActive ? 10 : 6,
+        decal: isDeceased ? {
+          symbol: 'line',
+          dashArrayX: [1, 0],
+          dashArrayY: [2, 5],
+          rotation: 45,
+          color: 'rgba(0, 0, 0, 0.2)'
+        } : undefined
       },
       label: {
-        show: true
+        show: true,
+        formatter: m.name,
+        position: 'bottom',
+        distance: 4,
+        color: '#ffffff',
+        fontSize: mid === centerId ? 11 : 9,
+        fontWeight: mid === centerId ? 'bold' : 'normal',
+        rotate: 0,
+        textBorderColor: 'rgba(0,0,0,0.8)',
+        textBorderWidth: 2.5
       },
-      rawMember: node
+      rawMember: m
+    })
+  }
+
+  // Draw links
+  const processedCouples = new Set()
+  for (const m of members) {
+    const mid = Number(m.id)
+    if (!coords.has(mid)) continue
+    
+    // 1. Spouses (Red Lines)
+    if (Array.isArray(m.spouseIds)) {
+      for (const sid of m.spouseIds) {
+        if (!coords.has(sid)) continue
+        const coupleKey = [mid, sid].sort().join('-')
+        if (processedCouples.has(coupleKey)) continue
+        processedCouples.add(coupleKey)
+
+        echartsLinks.push({
+          source: String(mid),
+          target: String(sid),
+          lineStyle: {
+            color: '#ff4d4d',
+            width: 3,
+            curveness: 0.15
+          }
+        })
+
+        const childrenOfCouple = members.filter(c => 
+          (c.fatherId === mid && c.motherId === sid) || 
+          (c.fatherId === sid && c.motherId === mid)
+        )
+
+        if (childrenOfCouple.length > 0) {
+          const c1 = coords.get(mid)
+          const c2 = coords.get(sid)
+          
+          const rMid = (c1.r + c2.r) / 2
+          const thetaMid = (c1.thetaDegrees + c2.thetaDegrees) / 2
+
+          const virtualNodeId = `midpoint-${coupleKey}`
+          echartsNodes.push({
+            id: virtualNodeId,
+            value: [rMid, thetaMid],
+            symbolSize: 0,
+            itemStyle: { opacity: 0 },
+            label: { show: false }
+          })
+
+          for (const child of childrenOfCouple) {
+            const childId = Number(child.id)
+            if (!coords.has(childId)) continue
+
+            const cChild = coords.get(childId)
+            const isDistant = Math.abs(cChild.r - rMid) > RingWidth * 1.5 || Math.abs(cChild.thetaDegrees - thetaMid) > 60
+
+            if (isDistant) {
+              const shortcutNodeId = `shortcut-${coupleKey}-${childId}`
+              const shortcutR = rMid + 30
+              const shortcutTheta = thetaMid
+
+              echartsNodes.push({
+                id: shortcutNodeId,
+                value: [shortcutR, shortcutTheta],
+                symbol: 'pin',
+                symbolSize: 10,
+                itemStyle: { color: '#4d7cff' },
+                label: {
+                  show: true,
+                  formatter: `→ To ${child.name}`,
+                  position: 'right',
+                  color: '#4d7cff',
+                  fontSize: 10,
+                  textBorderColor: 'rgba(0,0,0,0.8)',
+                  textBorderWidth: 2
+                }
+              })
+
+              echartsLinks.push({
+                source: virtualNodeId,
+                target: shortcutNodeId,
+                lineStyle: {
+                  color: '#4d7cff',
+                  width: 1.5,
+                  type: 'dashed'
+                }
+              })
+            } else {
+              echartsLinks.push({
+                source: virtualNodeId,
+                target: String(childId),
+                lineStyle: {
+                  color: '#4d7cff',
+                  width: 2,
+                  curveness: 0.05
+                },
+                symbol: ['none', 'arrow'],
+                symbolSize: [0, 6]
+              })
+            }
+          }
+        }
+      }
+    }
+
+    // 2. Single Parent (Blue Lines)
+    const childrenOfSingleParent = members.filter(c => {
+      const isFatherChild = c.fatherId === mid && (!c.motherId || !Array.isArray(m.spouseIds) || !m.spouseIds.includes(c.motherId))
+      const isMotherChild = c.motherId === mid && (!c.fatherId || !Array.isArray(m.spouseIds) || !m.spouseIds.includes(c.fatherId))
+      return isFatherChild || isMotherChild
+    })
+
+    for (const child of childrenOfSingleParent) {
+      const childId = Number(child.id)
+      if (!coords.has(childId)) continue
+      
+      const cChild = coords.get(childId)
+      const cParent = coords.get(mid)
+      const isDistant = Math.abs(cChild.r - cParent.r) > RingWidth * 1.5 || Math.abs(cChild.thetaDegrees - cParent.thetaDegrees) > 60
+
+      if (isDistant) {
+        const shortcutNodeId = `shortcut-single-${mid}-${childId}`
+        const shortcutR = cParent.r + 30
+        const shortcutTheta = cParent.thetaDegrees
+
+        echartsNodes.push({
+          id: shortcutNodeId,
+          value: [shortcutR, shortcutTheta],
+          symbol: 'pin',
+          symbolSize: 10,
+          itemStyle: { color: '#4d7cff' },
+          label: {
+            show: true,
+            formatter: `→ To ${child.name}`,
+            position: 'right',
+            color: '#4d7cff',
+            fontSize: 10,
+            textBorderColor: 'rgba(0,0,0,0.8)',
+            textBorderWidth: 2
+          }
+        })
+
+        echartsLinks.push({
+          source: String(mid),
+          target: shortcutNodeId,
+          lineStyle: {
+            color: '#4d7cff',
+            width: 1.5,
+            type: 'dashed'
+          }
+        })
+      } else {
+        echartsLinks.push({
+          source: String(mid),
+          target: String(childId),
+          lineStyle: {
+            color: '#4d7cff',
+            width: 2,
+            curveness: 0.05
+          },
+          symbol: ['none', 'arrow'],
+          symbolSize: [0, 6]
+        })
+      }
     }
   }
-  
-  const convertedRoots = roots.map((root, rootIndex) => 
-    convertNode(root, 1, null, rootIndex)
-  )
-  
+
+  // Handle search keywords
   const keyword = normalizeText(searchKeyword.value).toLowerCase()
   const isSearchActive = !!keyword
-  
-  const finalRoots = []
-  for (const root of convertedRoots) {
-    const filtered = filterSunburstNode(root, isSearchActive, keyword)
-    finalRoots.push(filtered.node)
+  if (isSearchActive) {
+    for (const node of echartsNodes) {
+      if (node.symbolSize === 0) continue
+      const m = node.rawMember
+      const spouseNames = (m.spouses || []).map(s => s.name).filter(Boolean).join('、') || m.spouse || ''
+      const searchHaystack = [
+        m.name,
+        m.branch,
+        m.generationName,
+        m.rankTitle,
+        spouseNames,
+        m.birthPlace,
+        m.residence
+      ].filter(Boolean).join(' ').toLowerCase()
+      
+      const matches = searchHaystack.includes(keyword)
+      if (matches) {
+        node.itemStyle.opacity = 1.0
+        node.itemStyle.borderColor = '#d3a26a'
+        node.itemStyle.borderWidth = 3
+        node.label.fontWeight = 'bold'
+      } else {
+        node.itemStyle.opacity = 0.15
+        node.label.opacity = 0.15
+      }
+    }
+
+    for (const link of echartsLinks) {
+      const sourceNode = echartsNodes.find(n => n.id === link.source)
+      const targetNode = echartsNodes.find(n => n.id === link.target)
+      const sourceDimmed = sourceNode && sourceNode.itemStyle && sourceNode.itemStyle.opacity === 0.15
+      const targetDimmed = targetNode && targetNode.itemStyle && targetNode.itemStyle.opacity === 0.15
+      if (sourceDimmed || targetDimmed) {
+        link.lineStyle = { ...link.lineStyle, opacity: 0.08 }
+      }
+    }
   }
-  
-  return finalRoots
+
+  return { nodes: echartsNodes, links: echartsLinks, maxDistance }
 }
 
 function renderChart() {
   if (!chartInstance) return
-  const data = getProcessedSunburstData()
   
+  if (!currentCenterMemberId.value && props.members.length > 0) {
+    currentCenterMemberId.value = findDefaultCenterMember()
+  }
+  
+  const focusId = currentCenterMemberId.value
+  if (!focusId) return
+
+  const layoutData = computeLayout(props.members, focusId)
+  const maxDistance = layoutData.maxDistance || 1
+
   const option = {
     tooltip: {
       trigger: 'item',
@@ -386,90 +823,108 @@ function renderChart() {
               <div><strong>生卒：</strong>${lifespan}</div>
               <div><strong>配偶：</strong>${spouse}</div>
               <div style="margin-top: 4px; font-size: 10px; color: rgba(255,255,255,0.5); border-top: 1px dashed rgba(255,255,255,0.15); padding-top: 4px;">
-                点击扇区即可打开个人档案
+                双击可将该成员设为关系圈中心
               </div>
             </div>
           </div>
         `
       }
     },
-    series: {
-      type: 'sunburst',
-      data: data,
-      radius: [0, '95%'],
-      sort: null,
-      emphasis: {
-        focus: 'ancestor'
-      },
-      levels: [
-        {},
-        {
-          r0: '0%',
-          r: '22%',
-          label: {
-            rotate: 'tangential',
-            fontSize: 12,
-            color: '#ffffff',
-            textBorderColor: 'rgba(0,0,0,0.6)',
-            textBorderWidth: 2
-          }
+    polar: {
+      center: ['50%', '50%'],
+      radius: '85%'
+    },
+    angleAxis: {
+      type: 'value',
+      startAngle: 0,
+      clockwise: false,
+      min: 0,
+      max: 360,
+      show: false
+    },
+    radiusAxis: {
+      type: 'value',
+      min: 0,
+      max: maxDistance * 120,
+      interval: 120,
+      show: true,
+      axisLine: { show: false },
+      axisLabel: { show: false },
+      axisTick: { show: false },
+      splitLine: {
+        lineStyle: {
+          color: 'rgba(211, 162, 106, 0.15)',
+          type: 'dashed',
+          width: 1
+        }
+      }
+    },
+    series: [
+      {
+        type: 'graph',
+        coordinateSystem: 'polar',
+        roam: true,
+        data: layoutData.nodes,
+        links: layoutData.links,
+        edgeSymbol: ['none', 'arrow'],
+        edgeSymbolSize: [0, 6],
+        itemStyle: {
+          borderWidth: 1.5,
+          borderColor: '#ffffff'
         },
-        {
-          r0: '22%',
-          r: '45%',
-          label: {
-            rotate: 'tangential',
-            fontSize: 11,
-            color: '#ffffff',
-            textBorderColor: 'rgba(0,0,0,0.6)',
-            textBorderWidth: 2
-          }
+        lineStyle: {
+          width: 2,
+          opacity: 0.8
         },
-        {
-          r0: '45%',
-          r: '70%',
-          label: {
-            rotate: 'tangential',
-            fontSize: 10,
-            color: '#ffffff',
-            textBorderColor: 'rgba(0,0,0,0.6)',
-            textBorderWidth: 2
-          }
-        },
-        {
-          r0: '70%',
-          r: '92%',
-          label: {
-            rotate: 'tangential',
-            fontSize: 9,
-            color: '#ffffff',
-            textBorderColor: 'rgba(0,0,0,0.6)',
-            textBorderWidth: 2
-          },
-          itemStyle: {
-            borderWidth: 1.5
+        emphasis: {
+          focus: 'adjacency',
+          lineStyle: {
+            width: 4
           }
         }
-      ],
-      nodeClick: 'zoom'
-    }
+      }
+    ]
   }
   chartInstance.setOption(option)
 }
 
-function resetSunburstZoom() {
-  if (chartInstance) {
-    chartInstance.dispatchAction({
-      type: 'sunburstRootToNode',
-      nodeId: null
-    })
+function goBackCenter() {
+  if (centerHistoryStack.value.length > 0) {
+    currentCenterMemberId.value = centerHistoryStack.value.pop()
+    renderChart()
   }
 }
+
+function resetToAncestor() {
+  const ancestorId = findDefaultCenterMember()
+  if (ancestorId && currentCenterMemberId.value !== ancestorId) {
+    centerHistoryStack.value.push(currentCenterMemberId.value)
+    currentCenterMemberId.value = ancestorId
+    renderChart()
+  }
+}
+
+function setCenterMember(memberId) {
+  if (!memberId) return
+  const idValue = isNaN(Number(memberId)) ? memberId : Number(memberId)
+  if (currentCenterMemberId.value !== idValue) {
+    if (currentCenterMemberId.value) {
+      centerHistoryStack.value.push(currentCenterMemberId.value)
+    }
+    currentCenterMemberId.value = idValue
+    renderChart()
+  }
+}
+
+defineExpose({
+  setCenterMember
+})
 
 function resetSunburstView() {
   searchKeyword.value = ''
   generationLimit.value = '5'
-  resetSunburstZoom()
+  centerHistoryStack.value = []
+  currentCenterMemberId.value = findDefaultCenterMember()
   renderChart()
 }
 
@@ -508,7 +963,7 @@ watch(displayMode, (newMode) => {
   }
 })
 
-watch(() => props.tree, () => {
+watch([() => props.tree, () => props.members], () => {
   if (displayMode.value === 'flow') {
     renderChart()
   }
@@ -1073,11 +1528,9 @@ async function switchToFlowAndReset() {
 
 watch(() => props.activeMemberId, (id) => {
   if (id) setLocalFocus(id)
-  if (!id || displayMode.value !== 'flow' || !chartInstance) return
-  chartInstance.dispatchAction({
-    type: 'sunburstRootToNode',
-    nodeId: String(id)
-  })
+  if (displayMode.value === 'flow') {
+    renderChart()
+  }
 })
 
 watch(branchOptions, (options) => {

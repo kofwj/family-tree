@@ -296,6 +296,7 @@
 
     <template v-if="member" #footer>
       <div class="drawer-footer-actions">
+        <el-button type="success" plain @click="$emit('set-center', member.id)">设为关系圈中心</el-button>
         <el-button plain type="warning" @click="$emit('locate-member', member.id)">在家谱中定位</el-button>
         <el-button v-if="canEdit" type="primary" @click="$emit('edit-member', member)">编辑补全</el-button>
         <el-button v-if="canDelete" type="danger" plain @click="$emit('delete-member', member)">删除</el-button>
@@ -363,7 +364,7 @@ const props = defineProps({
   canManageSources: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['update:modelValue', 'edit-member', 'delete-member', 'open-member', 'locate-member', 'upload-photo', 'refresh-citations', 'create-citation'])
+const emit = defineEmits(['update:modelValue', 'edit-member', 'delete-member', 'open-member', 'locate-member', 'upload-photo', 'refresh-citations', 'create-citation', 'set-center'])
 const canEdit = computed(() => props.canEdit && !isBasicVisible.value)
 const isBasicVisible = computed(() => props.member?.visibilityScope === 'basic')
 const canDelete = computed(() => props.canDelete)

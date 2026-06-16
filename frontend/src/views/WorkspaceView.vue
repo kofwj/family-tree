@@ -96,6 +96,7 @@
       <el-tabs v-model="tab" class="main-tabs">
         <el-tab-pane label="壹 · 家族世系" name="tree">
           <TreePanel
+            ref="treePanelRef"
             :tree="tree"
             :members="members"
             :active-member-id="activeTreeMemberId"
@@ -209,6 +210,7 @@
       @delete-member="onDrawerDelete"
       @refresh-citations="loadMemberCitations"
       @create-citation="createMemberCitation"
+      @set-center="setCenterMember"
     />
     <MemberForm
       v-model="formVisible"
@@ -257,6 +259,7 @@ const selected = ref(null)
 const activeTreeMemberId = ref(null)
 const darkMode = ref(localStorage.getItem('theme') === 'dark')
 const savingSettings = ref(false)
+const treePanelRef = ref(null)
 
 // Family management
 const families = ref([])
@@ -359,6 +362,12 @@ function locateMemberInTree(memberOrId) {
   activeTreeMemberId.value = fresh.id ?? null
   tab.value = 'tree'
   drawer.value = false
+}
+
+function setCenterMember(memberId) {
+  if (treePanelRef.value) {
+    treePanelRef.value.setCenterMember(memberId)
+  }
 }
 
 function openCreateForm() {
