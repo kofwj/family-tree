@@ -137,6 +137,49 @@
 
     <div v-else class="tree-wrap flow-wrap sunburst-wrap">
       <div ref="chartRef" class="sunburst-chart-canvas"></div>
+
+      <!-- Floating Legend -->
+      <div class="flow-chart-legend">
+        <div class="legend-title">图谱图例</div>
+        <div class="legend-group">
+          <div class="legend-group-title">关系连线</div>
+          <div class="legend-item">
+            <span class="legend-line line-spouse"></span>
+            <span>配偶 (亮红实体弧线)</span>
+          </div>
+          <div class="legend-item">
+            <span class="legend-line line-child"></span>
+            <span>子女 (蓝色指向箭头)</span>
+          </div>
+          <div class="legend-item">
+            <span class="legend-pin"></span>
+            <span>远距跨圈导航图钉</span>
+          </div>
+        </div>
+        <div class="legend-group">
+          <div class="legend-group-title">人物年代/状态</div>
+          <div class="legend-item">
+            <span class="legend-dot dot-millennial"></span>
+            <span>2000年后出生 (粉红)</span>
+          </div>
+          <div class="legend-item">
+            <span class="legend-dot dot-modern"></span>
+            <span>1970-1999出生 (橙黄)</span>
+          </div>
+          <div class="legend-item">
+            <span class="legend-dot dot-classic"></span>
+            <span>1970前/生年不详 (蔚蓝)</span>
+          </div>
+          <div class="legend-item">
+            <span class="legend-dot dot-deceased"></span>
+            <span>已故成员 (灰色+斜纹)</span>
+          </div>
+          <div class="legend-item">
+            <span class="legend-dot dot-active"></span>
+            <span>当前选中/查看中</span>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -2174,6 +2217,7 @@ watch(readerItems, (items) => {
   border-radius: 999px;
 }
 .sunburst-wrap {
+  position: relative;
   width: 100%;
   height: 100%;
   min-height: 720px;
@@ -2191,5 +2235,124 @@ watch(readerItems, (items) => {
   width: 100%;
   height: 100%;
   min-height: 700px;
+}
+
+/* Floating Legend Style */
+.flow-chart-legend {
+  position: absolute;
+  left: 20px;
+  bottom: 20px;
+  background: rgba(30, 25, 20, 0.95);
+  border: 1px solid rgba(211, 162, 106, 0.4);
+  border-radius: 14px;
+  padding: 14px;
+  color: #ffffff;
+  font-family: system-ui, sans-serif;
+  font-size: 11px;
+  z-index: 10;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(6px);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 175px;
+  pointer-events: auto;
+}
+
+.legend-title {
+  font-weight: 700;
+  font-size: 12px;
+  border-bottom: 1px solid rgba(211, 162, 106, 0.3);
+  padding-bottom: 6px;
+  color: #d3a26a;
+}
+
+.legend-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.legend-group-title {
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 2px;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.legend-line {
+  width: 18px;
+  height: 3px;
+  border-radius: 1.5px;
+  display: inline-block;
+}
+
+.line-spouse {
+  background: #ff4d4d;
+}
+
+.line-child {
+  background: #4d7cff;
+  position: relative;
+}
+.line-child::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  top: -2px;
+  border-left: 4px solid #4d7cff;
+  border-top: 3.5px solid transparent;
+  border-bottom: 3.5px solid transparent;
+}
+
+.legend-pin {
+  width: 10px;
+  height: 10px;
+  background: #4d7cff;
+  border-radius: 50% 50% 50% 0;
+  transform: rotate(-45deg);
+  display: inline-block;
+  margin-left: 4px;
+  margin-right: 4px;
+}
+
+.legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+  border: 1px solid #ffffff;
+}
+
+.dot-millennial {
+  background: #ff85a2;
+}
+
+.dot-modern {
+  background: #ffbe5c;
+}
+
+.dot-classic {
+  background: #5cb8ff;
+}
+
+.dot-deceased {
+  background: #a0a0a0;
+  border-color: #666666;
+  background-image: linear-gradient(45deg, rgba(0,0,0,0.15) 25%, transparent 25%, transparent 50%, rgba(0,0,0,0.15) 50%, rgba(0,0,0,0.15) 75%, transparent 75%, transparent);
+  background-size: 4px 4px;
+}
+
+.dot-active {
+  background: #5cb8ff;
+  border: 2px solid #c48b58;
+  box-shadow: 0 0 4px #c48b58;
 }
 </style>
