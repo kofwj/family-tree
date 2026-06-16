@@ -387,6 +387,24 @@ const defaultForm = () => ({
 const form = ref(defaultForm())
 const relationOptions = computed(() => (props.allMembers || []).filter(m => m.id !== props.member?.id))
 
+function findMemberIdByName(name, allMembers) {
+  if (!name || !allMembers) return null
+  const cleanedName = name.trim()
+  const match = allMembers.find(m => m.name === cleanedName)
+  return match ? match.id : null
+}
+
+function findSpouseIdsByName(spouseStr, allMembers) {
+  if (!spouseStr || !allMembers) return []
+  return spouseStr.split(/[、,，]/)
+    .map(name => name.trim())
+    .map(name => {
+      const match = allMembers.find(m => m.name === name)
+      return match ? match.id : null
+    })
+    .filter(Boolean)
+}
+
 function memberToForm(member) {
   return {
     ...defaultForm(),
@@ -421,9 +439,11 @@ function memberToForm(member) {
     deathIsLeapMonth: member.deathIsLeapMonth === true,
     deathDateText: member.deathDateText || '',
     isLiving: member.isLiving !== false && !member.deathDate,
-    spouseIds: Array.isArray(member.spouseIds) ? member.spouseIds : [],
-    fatherId: member.fatherId ?? null,
-    motherId: member.motherId ?? null,
+    spouseIds: (Array.isArray(member.spouseIds) && member.spouseIds.length > 0)
+      ? member.spouseIds
+      : findSpouseIdsByName(member.spouse, props.allMembers),
+    fatherId: member.fatherId ?? findMemberIdByName(member.fatherName, props.allMembers) ?? null,
+    motherId: member.motherId ?? findMemberIdByName(member.motherName, props.allMembers) ?? null,
     childrenNote: member.childrenNote || '',
     marriageYear: member.marriageYear || '',
     marriageNote: member.marriageNote || '',

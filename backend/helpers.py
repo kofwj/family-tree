@@ -456,6 +456,63 @@ def run_auto_organization(session: Session):
                 
         session.commit()
 
+def heal_unlinked_relations(session: Session):
+    members = session.exec(select(Member)).all()
+    by_name: Dict[str, List[Member]] = {}
+    for m in members:
+        nm = normalize_name_value(m.name)
+        if nm:
+            by_name.setdefault(nm, []).append(m)
+
+    healed_count = 0
+    for m in members:
+        changed = False
+        family_id = m.primary_family_id
+
+        # 1. Heal father relation
+        if m.father_name and not m.father_id:
+            cands = [x for x in by_name.get(normalize_name_value(m.father_name), []) if x.primary_family_id == family_id]
+            father = pick_best_parent(cands, m.generation)
+            if father and father.id:
+                m.father_id = father.id
+                changed = True
+                
+        # 2. Heal mother relation
+        if m.mother_name and not m.mother_id:
+            cands = [x for x in by_name.get(normalize_name_value(m.mother_name), []) if x.primary_family_id == family_id]
+            mother = pick_best_parent(cands, m.generation)
+            if mother and mother.id:
+                m.mother_id = mother.id
+                changed = True
+
+        # 3. Heal spouse relations
+        spouse_ids = parse_spouse_ids_value(m.spouse_ids)
+        if m.spouse_name and not spouse_ids:
+            spouse_members = []
+            for sp_name in split_relation_names(m.spouse_name):
+                cands = [x for x in by_name.get(sp_name, []) if x.primary_family_id == family_id]
+                best_sp = pick_best_spouse(cands, m.generation, exclude_id=m.id)
+                if best_sp:
+                    spouse_members.append(best_sp)
+            uniq_ids = []
+            for sp in spouse_members:
+                if sp.id and sp.id != m.id and sp.id not in uniq_ids:
+                    uniq_ids.append(sp.id)
+            if uniq_ids:
+                m.spouse_ids = encode_spouse_ids_value(uniq_ids)
+                changed = True
+
+        if changed:
+            session.add(m)
+            healed_count += 1
+
+    if healed_count > 0:
+        session.commit()
+        # Also sync links
+        for m in members:
+            sync_member_spouse_links(session, m.id, [], parse_spouse_ids_value(m.spouse_ids))
+        print(f"[Heal] Automatically healed {healed_count} unlinked member relationships.")
+
 def init_db():
     from sqlalchemy import inspect
     from alembic.config import Config
@@ -483,6 +540,7 @@ def init_db():
         ensure_default_family_group(session)
         ensure_member_primary_family(session)
         run_auto_organization(session)
+        heal_unlinked_relations(session)
         ensure_default_admin(session)
 
 def hash_password(password: str) -> str:

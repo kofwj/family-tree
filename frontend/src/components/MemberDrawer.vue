@@ -481,11 +481,28 @@ function findMemberById(id) {
   return (props.allMembers || []).find(m => Number(m.id) === target) || null
 }
 
-const fatherMember = computed(() => findMemberById(props.member?.fatherId))
-const motherMember = computed(() => findMemberById(props.member?.motherId))
+const fatherMember = computed(() => {
+  return findMemberById(props.member?.fatherId) || 
+         (props.member?.fatherName ? (props.allMembers || []).find(m => m.name === props.member.fatherName.trim()) : null) || 
+         null
+})
+const motherMember = computed(() => {
+  return findMemberById(props.member?.motherId) || 
+         (props.member?.motherName ? (props.allMembers || []).find(m => m.name === props.member.motherName.trim()) : null) || 
+         null
+})
 const spouseMembers = computed(() => {
   const directIds = Array.isArray(props.member?.spouseIds) ? props.member.spouseIds : []
   const direct = directIds.map(findMemberById).filter(Boolean)
+  
+  if (direct.length === 0 && props.member?.spouse) {
+    const names = props.member.spouse.split(/[、,，]/).map(n => n.trim()).filter(Boolean)
+    for (const name of names) {
+      const match = (props.allMembers || []).find(m => m.name === name)
+      if (match) direct.push(match)
+    }
+  }
+
   const selfId = Number(props.member?.id)
   if (Number.isFinite(selfId)) {
     for (const candidate of props.allMembers || []) {
