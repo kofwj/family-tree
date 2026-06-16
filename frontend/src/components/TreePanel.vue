@@ -696,6 +696,45 @@ function computeLayout(members, centerId) {
     // Check if authenticated photo is loaded
     const photoUrl = authenticatedPhotos.value.get(mid)
 
+    // Determine dynamic label position to avoid line collisions
+    let labelPosition = 'bottom'
+    if (mid === Number(centerId)) {
+      labelPosition = 'left'
+    } else {
+      let spouseId = null
+      if (Array.isArray(m.spouseIds)) {
+        for (const sid of m.spouseIds) {
+          if (coords.has(Number(sid))) {
+            spouseId = Number(sid)
+            break
+          }
+        }
+      }
+
+      const angle = ((thetaDegrees % 360) + 360) % 360
+      const isTopOrBottom = (angle >= 45 && angle < 135) || (angle >= 225 && angle < 315)
+      
+      if (isTopOrBottom) {
+        if (spouseId !== null && coords.has(spouseId)) {
+          const cSpouse = coords.get(spouseId)
+          const xNode = Math.cos(thetaDegrees * Math.PI / 180)
+          const xSpouse = Math.cos(cSpouse.thetaDegrees * Math.PI / 180)
+          labelPosition = xSpouse > xNode ? 'left' : 'right'
+        } else {
+          labelPosition = 'right'
+        }
+      } else {
+        if (spouseId !== null && coords.has(spouseId)) {
+          const cSpouse = coords.get(spouseId)
+          const yNode = -Math.sin(thetaDegrees * Math.PI / 180)
+          const ySpouse = -Math.sin(cSpouse.thetaDegrees * Math.PI / 180)
+          labelPosition = ySpouse > yNode ? 'top' : 'bottom'
+        } else {
+          labelPosition = 'bottom'
+        }
+      }
+    }
+
     if (photoUrl) {
       // 1. Push border ring node (bottom layer)
       echartsNodes.push({
@@ -725,8 +764,8 @@ function computeLayout(members, centerId) {
         label: {
           show: true,
           formatter: m.name,
-          position: 'bottom',
-          distance: 4,
+          position: labelPosition,
+          distance: 6,
           color: '#ffffff',
           fontSize: mid === centerId ? 11 : 9,
           fontWeight: mid === centerId ? 'bold' : 'normal',
@@ -784,8 +823,8 @@ function computeLayout(members, centerId) {
         label: {
           show: true,
           formatter: m.name,
-          position: 'bottom',
-          distance: 4,
+          position: labelPosition,
+          distance: 6,
           color: '#ffffff',
           fontSize: mid === centerId ? 11 : 9,
           fontWeight: mid === centerId ? 'bold' : 'normal',
@@ -812,13 +851,22 @@ function computeLayout(members, centerId) {
         if (processedCouples.has(coupleKey)) continue
         processedCouples.add(coupleKey)
 
+        const c1 = coords.get(mid)
+        const c2 = coords.get(sid)
+        
+        let diff = c2.thetaDegrees - c1.thetaDegrees
+        if (diff > 180) diff -= 360
+        if (diff < -180) diff += 360
+        
+        const spouseCurveness = -Math.sign(diff) * 0.18
+
         echartsLinks.push({
           source: String(mid),
           target: String(sid),
           lineStyle: {
             color: '#ff4d4d',
             width: 3,
-            curveness: 0.15
+            curveness: spouseCurveness
           }
         })
 
@@ -828,11 +876,18 @@ function computeLayout(members, centerId) {
         )
 
         if (childrenOfCouple.length > 0) {
-          const c1 = coords.get(mid)
-          const c2 = coords.get(sid)
+          const deltaThetaRad = Math.abs(diff) * Math.PI / 180
           
-          const rMid = (c1.r + c2.r) / 2
-          const thetaMid = (c1.thetaDegrees + c2.thetaDegrees) / 2
+          // Calculate rMid to lie exactly on the curved spouse arc
+          const rMid = ((c1.r + c2.r) / 2) * (Math.cos(deltaThetaRad / 2) + Math.abs(spouseCurveness) * Math.sin(deltaThetaRad / 2))
+          
+          // Use vector average for thetaMid to avoid wrap-around issues
+          const sumCos = Math.cos(c1.thetaDegrees * Math.PI / 180) + Math.cos(c2.thetaDegrees * Math.PI / 180)
+          const sumSin = Math.sin(c1.thetaDegrees * Math.PI / 180) + Math.sin(c2.thetaDegrees * Math.PI / 180)
+          let thetaMid = Math.atan2(sumSin, sumCos) * 180 / Math.PI
+          thetaMid = ((thetaMid % 360) + 360) % 360
+
+          const isCenterCouple = (mid === Number(centerId) || sid === Number(centerId))
 
           const thetaMidRad = thetaMid * Math.PI / 180
           const xMid = rMid * Math.cos(thetaMidRad)
@@ -848,13 +903,15 @@ function computeLayout(members, centerId) {
             label: { show: false }
           })
 
+          const parentSourceId = isCenterCouple ? String(centerId) : virtualNodeId
+
           const closeChildren = []
           for (const child of childrenOfCouple) {
             const childId = Number(child.id)
             if (!coords.has(childId)) continue
 
             const cChild = coords.get(childId)
-            const isDistant = Math.abs(cChild.r - rMid) > RingWidth * 1.5 || Math.abs(cChild.thetaDegrees - thetaMid) > 60
+            const isDistant = !isCenterCouple && (Math.abs(cChild.r - rMid) > RingWidth * 1.5 || Math.abs(cChild.thetaDegrees - thetaMid) > 60)
 
             if (isDistant) {
               const shortcutNodeId = `shortcut-${coupleKey}-${childId}`
@@ -900,7 +957,7 @@ function computeLayout(members, centerId) {
           if (closeChildren.length > 0) {
             if (closeChildren.length === 1) {
               echartsLinks.push({
-                source: virtualNodeId,
+                source: parentSourceId,
                 target: String(closeChildren[0].childId),
                 lineStyle: {
                   color: '#4d7cff',
@@ -911,10 +968,18 @@ function computeLayout(members, centerId) {
                 symbolSize: [0, 6]
               })
             } else {
-              const rC = rMid + RingWidth
-              const thetaMidRad = thetaMid * Math.PI / 180
-              const xCC = rC * Math.cos(thetaMidRad)
-              const yCC = -rC * Math.sin(thetaMidRad)
+              // Use vector average for avgTheta to avoid wrap-around issues
+              const sumCos = closeChildren.reduce((sum, c) => sum + Math.cos(c.cChild.thetaDegrees * Math.PI / 180), 0)
+              const sumSin = closeChildren.reduce((sum, c) => sum + Math.sin(c.cChild.thetaDegrees * Math.PI / 180), 0)
+              let avgTheta = Math.atan2(sumSin, sumCos) * 180 / Math.PI
+              avgTheta = ((avgTheta % 360) + 360) % 360
+
+              // Place the bracket exactly halfway between the child ring and the immediate inner ring
+              const rChild = closeChildren[0].cChild.r
+              const rCC = rChild - RingWidth / 2
+              const avgThetaRad = avgTheta * Math.PI / 180
+              const xCC = rCC * Math.cos(avgThetaRad)
+              const yCC = -rCC * Math.sin(avgThetaRad)
 
               const ccNodeId = `cc-${coupleKey}`
               echartsNodes.push({
@@ -927,7 +992,7 @@ function computeLayout(members, centerId) {
               })
 
               echartsLinks.push({
-                source: virtualNodeId,
+                source: parentSourceId,
                 target: ccNodeId,
                 lineStyle: {
                   color: '#4d7cff',
@@ -936,7 +1001,7 @@ function computeLayout(members, centerId) {
               })
 
               for (const cc of closeChildren) {
-                let diff = cc.cChild.thetaDegrees - thetaMid
+                let diff = cc.cChild.thetaDegrees - avgTheta
                 if (diff > 180) diff -= 360
                 if (diff < -180) diff += 360
                 const curveness = Math.sin(diff * Math.PI / 180) * 0.2
@@ -968,6 +1033,7 @@ function computeLayout(members, centerId) {
 
     if (childrenOfSingleParent.length > 0) {
       const cParent = coords.get(mid)
+      const isCenterParent = (mid === Number(centerId))
       const closeSingleChildren = []
 
       for (const child of childrenOfSingleParent) {
@@ -975,7 +1041,7 @@ function computeLayout(members, centerId) {
         if (!coords.has(childId)) continue
         
         const cChild = coords.get(childId)
-        const isDistant = Math.abs(cChild.r - cParent.r) > RingWidth * 1.5 || Math.abs(cChild.thetaDegrees - cParent.thetaDegrees) > 60
+        const isDistant = !isCenterParent && (Math.abs(cChild.r - cParent.r) > RingWidth * 1.5 || Math.abs(cChild.thetaDegrees - cParent.thetaDegrees) > 60)
 
         if (isDistant) {
           const shortcutNodeId = `shortcut-single-${mid}-${childId}`
@@ -1032,10 +1098,18 @@ function computeLayout(members, centerId) {
             symbolSize: [0, 6]
           })
         } else {
-          const rC = cParent.r + RingWidth
-          const thetaParentRad = cParent.thetaDegrees * Math.PI / 180
-          const xCC = rC * Math.cos(thetaParentRad)
-          const yCC = -rC * Math.sin(thetaParentRad)
+          // Use vector average for avgTheta to avoid wrap-around issues
+          const sumCos = closeSingleChildren.reduce((sum, c) => sum + Math.cos(c.cChild.thetaDegrees * Math.PI / 180), 0)
+          const sumSin = closeSingleChildren.reduce((sum, c) => sum + Math.sin(c.cChild.thetaDegrees * Math.PI / 180), 0)
+          let avgTheta = Math.atan2(sumSin, sumCos) * 180 / Math.PI
+          avgTheta = ((avgTheta % 360) + 360) % 360
+
+          // Place the bracket exactly halfway between the child ring and the parent ring
+          const rChild = closeSingleChildren[0].cChild.r
+          const rCC = rChild - RingWidth / 2
+          const avgThetaRad = avgTheta * Math.PI / 180
+          const xCC = rCC * Math.cos(avgThetaRad)
+          const yCC = -rCC * Math.sin(avgThetaRad)
 
           const ccNodeId = `cc-single-${mid}`
           echartsNodes.push({
@@ -1057,7 +1131,7 @@ function computeLayout(members, centerId) {
           })
 
           for (const cc of closeSingleChildren) {
-            let diff = cc.cChild.thetaDegrees - cParent.thetaDegrees
+            let diff = cc.cChild.thetaDegrees - avgTheta
             if (diff > 180) diff -= 360
             if (diff < -180) diff += 360
             const curveness = Math.sin(diff * Math.PI / 180) * 0.2
