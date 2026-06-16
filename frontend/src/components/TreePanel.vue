@@ -658,10 +658,15 @@ function computeLayout(members, centerId) {
     
     const isDeceased = !m.isLiving || m.deathDate || m.deathDateText
     
+    const thetaRad = thetaDegrees * Math.PI / 180
+    const x = r * Math.cos(thetaRad)
+    const y = -r * Math.sin(thetaRad)
+
     echartsNodes.push({
       id: String(mid),
       name: m.name,
-      value: [r, thetaDegrees],
+      x: x,
+      y: y,
       symbolSize: mid === centerId ? 42 : 30,
       itemStyle: {
         color: color,
@@ -729,10 +734,15 @@ function computeLayout(members, centerId) {
           const rMid = (c1.r + c2.r) / 2
           const thetaMid = (c1.thetaDegrees + c2.thetaDegrees) / 2
 
+          const thetaMidRad = thetaMid * Math.PI / 180
+          const xMid = rMid * Math.cos(thetaMidRad)
+          const yMid = -rMid * Math.sin(thetaMidRad)
+
           const virtualNodeId = `midpoint-${coupleKey}`
           echartsNodes.push({
             id: virtualNodeId,
-            value: [rMid, thetaMid],
+            x: xMid,
+            y: yMid,
             symbolSize: 0,
             itemStyle: { opacity: 0 },
             label: { show: false }
@@ -750,9 +760,14 @@ function computeLayout(members, centerId) {
               const shortcutR = rMid + 30
               const shortcutTheta = thetaMid
 
+              const shortcutThetaRad = shortcutTheta * Math.PI / 180
+              const xShortcut = shortcutR * Math.cos(shortcutThetaRad)
+              const yShortcut = -shortcutR * Math.sin(shortcutThetaRad)
+
               echartsNodes.push({
                 id: shortcutNodeId,
-                value: [shortcutR, shortcutTheta],
+                x: xShortcut,
+                y: yShortcut,
                 symbol: 'pin',
                 symbolSize: 10,
                 itemStyle: { color: '#4d7cff' },
@@ -814,9 +829,14 @@ function computeLayout(members, centerId) {
         const shortcutR = cParent.r + 30
         const shortcutTheta = cParent.thetaDegrees
 
+        const shortcutThetaRad = shortcutTheta * Math.PI / 180
+        const xShortcut = shortcutR * Math.cos(shortcutThetaRad)
+        const yShortcut = -shortcutR * Math.sin(shortcutThetaRad)
+
         echartsNodes.push({
           id: shortcutNodeId,
-          value: [shortcutR, shortcutTheta],
+          x: xShortcut,
+          y: yShortcut,
           symbol: 'pin',
           symbolSize: 10,
           itemStyle: { color: '#4d7cff' },
@@ -861,8 +881,9 @@ function computeLayout(members, centerId) {
   const isSearchActive = !!keyword
   if (isSearchActive) {
     for (const node of echartsNodes) {
-      if (node.symbolSize === 0) continue
+      if (node.symbolSize === 0 || node.id.startsWith('ring-')) continue
       const m = node.rawMember
+      if (!m) continue
       const spouseNames = (m.spouses || []).map(s => s.name).filter(Boolean).join('、') || m.spouse || ''
       const searchHaystack = [
         m.name,
@@ -895,6 +916,24 @@ function computeLayout(members, centerId) {
         link.lineStyle = { ...link.lineStyle, opacity: 0.08 }
       }
     }
+  }
+
+  // Add background helper rings (concentric circles)
+  for (let i = 1; i <= maxDistance; i++) {
+    echartsNodes.push({
+      id: `ring-${i}`,
+      x: 0,
+      y: 0,
+      symbol: 'circle',
+      symbolSize: i * RingWidth * 2,
+      itemStyle: {
+        color: 'none',
+        borderColor: 'rgba(211, 162, 106, 0.15)',
+        borderWidth: 1,
+        borderType: 'dashed'
+      },
+      silent: true
+    })
   }
 
   return { nodes: echartsNodes, links: echartsLinks, maxDistance }
@@ -950,39 +989,10 @@ function renderChart() {
         `
       }
     },
-    polar: {
-      center: ['50%', '50%'],
-      radius: '85%'
-    },
-    angleAxis: {
-      type: 'value',
-      startAngle: 0,
-      clockwise: false,
-      min: 0,
-      max: 360,
-      show: false
-    },
-    radiusAxis: {
-      type: 'value',
-      min: 0,
-      max: maxDistance * 120,
-      interval: 120,
-      show: true,
-      axisLine: { show: false },
-      axisLabel: { show: false },
-      axisTick: { show: false },
-      splitLine: {
-        lineStyle: {
-          color: 'rgba(211, 162, 106, 0.15)',
-          type: 'dashed',
-          width: 1
-        }
-      }
-    },
     series: [
       {
         type: 'graph',
-        coordinateSystem: 'polar',
+        layout: 'none',
         roam: true,
         data: layoutData.nodes,
         links: layoutData.links,
