@@ -193,6 +193,7 @@
 import { computed, nextTick, ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import * as echarts from 'echarts'
 import { FAMILY_HUE_PRESETS, getFamilySurname, getBaseHueForSurname, generateFamilyPalette } from '../utils/genealogy'
+import { fetchAuthenticatedObjectUrl, revokeObjectUrl } from '../utils/authenticatedAsset'
 
 const props = defineProps({
   tree: { type: Array, default: () => [] },
@@ -213,6 +214,36 @@ const centerHistoryStack = ref([])
 
 const chartRef = ref(null)
 let chartInstance = null
+
+const authenticatedPhotos = ref(new Map())
+
+async function loadMemberPhotos() {
+  for (const m of props.members || []) {
+    const mid = Number(m.id)
+    if (m.photoUrl && !authenticatedPhotos.value.has(mid)) {
+      try {
+        const blobUrl = await fetchAuthenticatedObjectUrl(m.photoUrl)
+        authenticatedPhotos.value.set(mid, blobUrl)
+        if (displayMode.value === 'flow') {
+          renderChart()
+        }
+      } catch (err) {
+        console.error(`Failed to load photo for member ${mid}:`, err)
+      }
+    }
+  }
+}
+
+function clearMemberPhotos() {
+  for (const url of authenticatedPhotos.value.values()) {
+    revokeObjectUrl(url)
+  }
+  authenticatedPhotos.value.clear()
+}
+
+watch(() => props.members, () => {
+  loadMemberPhotos()
+}, { immediate: true, deep: true })
 
 const branchPalette = computed(() => {
   const surname = getFamilySurname(props.familyName)
@@ -662,40 +693,109 @@ function computeLayout(members, centerId) {
     const x = r * Math.cos(thetaRad)
     const y = -r * Math.sin(thetaRad)
 
-    echartsNodes.push({
-      id: String(mid),
-      name: m.name,
-      x: x,
-      y: y,
-      symbolSize: mid === centerId ? 42 : 30,
-      itemStyle: {
-        color: color,
-        borderColor: isActive ? '#c48b58' : (isDeceased ? '#666666' : '#ffffff'),
-        borderWidth: isActive ? 3 : (isDeceased ? 2 : 1.5),
-        shadowColor: isActive ? '#c48b58' : 'rgba(0,0,0,0.15)',
-        shadowBlur: isActive ? 10 : 6,
-        decal: isDeceased ? {
-          symbol: 'line',
-          dashArrayX: [1, 0],
-          dashArrayY: [2, 5],
-          rotation: 45,
-          color: 'rgba(0, 0, 0, 0.2)'
-        } : undefined
-      },
-      label: {
-        show: true,
-        formatter: m.name,
-        position: 'bottom',
-        distance: 4,
-        color: '#ffffff',
-        fontSize: mid === centerId ? 11 : 9,
-        fontWeight: mid === centerId ? 'bold' : 'normal',
-        rotate: 0,
-        textBorderColor: 'rgba(0,0,0,0.8)',
-        textBorderWidth: 2.5
-      },
-      rawMember: m
-    })
+    // Check if authenticated photo is loaded
+    const photoUrl = authenticatedPhotos.value.get(mid)
+
+    if (photoUrl) {
+      // 1. Push border ring node (bottom layer)
+      echartsNodes.push({
+        id: `border-${mid}`,
+        x: x,
+        y: y,
+        symbol: 'circle',
+        symbolSize: mid === centerId ? 48 : 36,
+        itemStyle: {
+          color: 'none',
+          borderColor: isActive ? '#c48b58' : (isDeceased ? '#666666' : color),
+          borderWidth: isActive ? 3 : (isDeceased ? 2 : 1.5),
+          shadowColor: isActive ? '#c48b58' : 'rgba(0,0,0,0.15)',
+          shadowBlur: isActive ? 10 : 6
+        },
+        silent: true
+      })
+
+      // 2. Push photo node with name label (middle layer)
+      echartsNodes.push({
+        id: String(mid),
+        name: m.name,
+        x: x,
+        y: y,
+        symbol: `image://${photoUrl}`,
+        symbolSize: mid === centerId ? 42 : 30,
+        label: {
+          show: true,
+          formatter: m.name,
+          position: 'bottom',
+          distance: 4,
+          color: '#ffffff',
+          fontSize: mid === centerId ? 11 : 9,
+          fontWeight: mid === centerId ? 'bold' : 'normal',
+          rotate: 0,
+          textBorderColor: 'rgba(0,0,0,0.8)',
+          textBorderWidth: 2.5
+        },
+        rawMember: m
+      })
+
+      // 3. Push deceased overlay if deceased (top layer)
+      if (isDeceased) {
+        echartsNodes.push({
+          id: `deceased-${mid}`,
+          x: x,
+          y: y,
+          symbol: 'circle',
+          symbolSize: mid === centerId ? 42 : 30,
+          itemStyle: {
+            color: 'rgba(128, 128, 128, 0.4)',
+            decal: {
+              symbol: 'line',
+              dashArrayX: [1, 0],
+              dashArrayY: [2, 5],
+              rotation: 45,
+              color: 'rgba(0, 0, 0, 0.25)'
+            }
+          },
+          silent: true
+        })
+      }
+    } else {
+      // Standard node without photo (clean colored circle)
+      echartsNodes.push({
+        id: String(mid),
+        name: m.name,
+        x: x,
+        y: y,
+        symbol: 'circle',
+        symbolSize: mid === centerId ? 42 : 30,
+        itemStyle: {
+          color: isDeceased ? '#a0a0a0' : color,
+          borderColor: isActive ? '#c48b58' : (isDeceased ? '#666666' : '#ffffff'),
+          borderWidth: isActive ? 3 : (isDeceased ? 2 : 1.5),
+          shadowColor: isActive ? '#c48b58' : 'rgba(0,0,0,0.15)',
+          shadowBlur: isActive ? 10 : 6,
+          decal: isDeceased ? {
+            symbol: 'line',
+            dashArrayX: [1, 0],
+            dashArrayY: [2, 5],
+            rotation: 45,
+            color: 'rgba(0, 0, 0, 0.2)'
+          } : undefined
+        },
+        label: {
+          show: true,
+          formatter: m.name,
+          position: 'bottom',
+          distance: 4,
+          color: '#ffffff',
+          fontSize: mid === centerId ? 11 : 9,
+          fontWeight: mid === centerId ? 'bold' : 'normal',
+          rotate: 0,
+          textBorderColor: 'rgba(0,0,0,0.8)',
+          textBorderWidth: 2.5
+        },
+        rawMember: m
+      })
+    }
   }
 
   // Draw links
@@ -748,6 +848,7 @@ function computeLayout(members, centerId) {
             label: { show: false }
           })
 
+          const closeChildren = []
           for (const child of childrenOfCouple) {
             const childId = Number(child.id)
             if (!coords.has(childId)) continue
@@ -792,9 +893,15 @@ function computeLayout(members, centerId) {
                 }
               })
             } else {
+              closeChildren.push({ childId, childName: child.name, cChild })
+            }
+          }
+
+          if (closeChildren.length > 0) {
+            if (closeChildren.length === 1) {
               echartsLinks.push({
                 source: virtualNodeId,
-                target: String(childId),
+                target: String(closeChildren[0].childId),
                 lineStyle: {
                   color: '#4d7cff',
                   width: 2,
@@ -803,6 +910,49 @@ function computeLayout(members, centerId) {
                 symbol: ['none', 'arrow'],
                 symbolSize: [0, 6]
               })
+            } else {
+              const rC = rMid + RingWidth
+              const thetaMidRad = thetaMid * Math.PI / 180
+              const xCC = rC * Math.cos(thetaMidRad)
+              const yCC = -rC * Math.sin(thetaMidRad)
+
+              const ccNodeId = `cc-${coupleKey}`
+              echartsNodes.push({
+                id: ccNodeId,
+                x: xCC,
+                y: yCC,
+                symbolSize: 0,
+                itemStyle: { opacity: 0 },
+                label: { show: false }
+              })
+
+              echartsLinks.push({
+                source: virtualNodeId,
+                target: ccNodeId,
+                lineStyle: {
+                  color: '#4d7cff',
+                  width: 2
+                }
+              })
+
+              for (const cc of closeChildren) {
+                let diff = cc.cChild.thetaDegrees - thetaMid
+                if (diff > 180) diff -= 360
+                if (diff < -180) diff += 360
+                const curveness = Math.sin(diff * Math.PI / 180) * 0.2
+
+                echartsLinks.push({
+                  source: ccNodeId,
+                  target: String(cc.childId),
+                  lineStyle: {
+                    color: '#4d7cff',
+                    width: 2,
+                    curveness: curveness
+                  },
+                  symbol: ['none', 'arrow'],
+                  symbolSize: [0, 6]
+                })
+              }
             }
           }
         }
@@ -816,62 +966,115 @@ function computeLayout(members, centerId) {
       return isFatherChild || isMotherChild
     })
 
-    for (const child of childrenOfSingleParent) {
-      const childId = Number(child.id)
-      if (!coords.has(childId)) continue
-      
-      const cChild = coords.get(childId)
+    if (childrenOfSingleParent.length > 0) {
       const cParent = coords.get(mid)
-      const isDistant = Math.abs(cChild.r - cParent.r) > RingWidth * 1.5 || Math.abs(cChild.thetaDegrees - cParent.thetaDegrees) > 60
+      const closeSingleChildren = []
 
-      if (isDistant) {
-        const shortcutNodeId = `shortcut-single-${mid}-${childId}`
-        const shortcutR = cParent.r + 30
-        const shortcutTheta = cParent.thetaDegrees
+      for (const child of childrenOfSingleParent) {
+        const childId = Number(child.id)
+        if (!coords.has(childId)) continue
+        
+        const cChild = coords.get(childId)
+        const isDistant = Math.abs(cChild.r - cParent.r) > RingWidth * 1.5 || Math.abs(cChild.thetaDegrees - cParent.thetaDegrees) > 60
 
-        const shortcutThetaRad = shortcutTheta * Math.PI / 180
-        const xShortcut = shortcutR * Math.cos(shortcutThetaRad)
-        const yShortcut = -shortcutR * Math.sin(shortcutThetaRad)
+        if (isDistant) {
+          const shortcutNodeId = `shortcut-single-${mid}-${childId}`
+          const shortcutR = cParent.r + 30
+          const shortcutTheta = cParent.thetaDegrees
 
-        echartsNodes.push({
-          id: shortcutNodeId,
-          x: xShortcut,
-          y: yShortcut,
-          symbol: 'pin',
-          symbolSize: 10,
-          itemStyle: { color: '#4d7cff' },
-          label: {
-            show: true,
-            formatter: `→ To ${child.name}`,
-            position: 'right',
-            color: '#4d7cff',
-            fontSize: 10,
-            textBorderColor: 'rgba(0,0,0,0.8)',
-            textBorderWidth: 2
+          const shortcutThetaRad = shortcutTheta * Math.PI / 180
+          const xShortcut = shortcutR * Math.cos(shortcutThetaRad)
+          const yShortcut = -shortcutR * Math.sin(shortcutThetaRad)
+
+          echartsNodes.push({
+            id: shortcutNodeId,
+            x: xShortcut,
+            y: yShortcut,
+            symbol: 'pin',
+            symbolSize: 10,
+            itemStyle: { color: '#4d7cff' },
+            label: {
+              show: true,
+              formatter: `→ To ${child.name}`,
+              position: 'right',
+              color: '#4d7cff',
+              fontSize: 10,
+              textBorderColor: 'rgba(0,0,0,0.8)',
+              textBorderWidth: 2
+            }
+          })
+
+          echartsLinks.push({
+            source: String(mid),
+            target: shortcutNodeId,
+            lineStyle: {
+              color: '#4d7cff',
+              width: 1.5,
+              type: 'dashed'
+            }
+          })
+        } else {
+          closeSingleChildren.push({ childId, childName: child.name, cChild })
+        }
+      }
+
+      if (closeSingleChildren.length > 0) {
+        if (closeSingleChildren.length === 1) {
+          echartsLinks.push({
+            source: String(mid),
+            target: String(closeSingleChildren[0].childId),
+            lineStyle: {
+              color: '#4d7cff',
+              width: 2,
+              curveness: 0.05
+            },
+            symbol: ['none', 'arrow'],
+            symbolSize: [0, 6]
+          })
+        } else {
+          const rC = cParent.r + RingWidth
+          const thetaParentRad = cParent.thetaDegrees * Math.PI / 180
+          const xCC = rC * Math.cos(thetaParentRad)
+          const yCC = -rC * Math.sin(thetaParentRad)
+
+          const ccNodeId = `cc-single-${mid}`
+          echartsNodes.push({
+            id: ccNodeId,
+            x: xCC,
+            y: yCC,
+            symbolSize: 0,
+            itemStyle: { opacity: 0 },
+            label: { show: false }
+          })
+
+          echartsLinks.push({
+            source: String(mid),
+            target: ccNodeId,
+            lineStyle: {
+              color: '#4d7cff',
+              width: 2
+            }
+          })
+
+          for (const cc of closeSingleChildren) {
+            let diff = cc.cChild.thetaDegrees - cParent.thetaDegrees
+            if (diff > 180) diff -= 360
+            if (diff < -180) diff += 360
+            const curveness = Math.sin(diff * Math.PI / 180) * 0.2
+
+            echartsLinks.push({
+              source: ccNodeId,
+              target: String(cc.childId),
+              lineStyle: {
+                color: '#4d7cff',
+                width: 2,
+                curveness: curveness
+              },
+              symbol: ['none', 'arrow'],
+              symbolSize: [0, 6]
+            })
           }
-        })
-
-        echartsLinks.push({
-          source: String(mid),
-          target: shortcutNodeId,
-          lineStyle: {
-            color: '#4d7cff',
-            width: 1.5,
-            type: 'dashed'
-          }
-        })
-      } else {
-        echartsLinks.push({
-          source: String(mid),
-          target: String(childId),
-          lineStyle: {
-            color: '#4d7cff',
-            width: 2,
-            curveness: 0.05
-          },
-          symbol: ['none', 'arrow'],
-          symbolSize: [0, 6]
-        })
+        }
       }
     }
   }
@@ -881,7 +1084,7 @@ function computeLayout(members, centerId) {
   const isSearchActive = !!keyword
   if (isSearchActive) {
     for (const node of echartsNodes) {
-      if (node.symbolSize === 0 || node.id.startsWith('ring-')) continue
+      if (node.symbolSize === 0 || node.id.startsWith('ring-') || node.id.startsWith('border-') || node.id.startsWith('deceased-')) continue
       const m = node.rawMember
       if (!m) continue
       const spouseNames = (m.spouses || []).map(s => s.name).filter(Boolean).join('、') || m.spouse || ''
@@ -897,13 +1100,31 @@ function computeLayout(members, centerId) {
       
       const matches = searchHaystack.includes(keyword)
       if (matches) {
+        node.itemStyle = node.itemStyle || {}
         node.itemStyle.opacity = 1.0
         node.itemStyle.borderColor = '#d3a26a'
         node.itemStyle.borderWidth = 3
+        node.label = node.label || {}
         node.label.fontWeight = 'bold'
+
+        // Highlight matching border node if it exists
+        const borderNode = echartsNodes.find(n => n.id === `border-${node.id}`)
+        if (borderNode) {
+          borderNode.itemStyle.opacity = 1.0
+          borderNode.itemStyle.borderColor = '#d3a26a'
+          borderNode.itemStyle.borderWidth = 3
+        }
       } else {
+        node.itemStyle = node.itemStyle || {}
         node.itemStyle.opacity = 0.15
+        node.label = node.label || {}
         node.label.opacity = 0.15
+
+        // Dim associated border/deceased nodes
+        const borderNode = echartsNodes.find(n => n.id === `border-${node.id}`)
+        if (borderNode) borderNode.itemStyle.opacity = 0.15
+        const deceasedNode = echartsNodes.find(n => n.id === `deceased-${node.id}`)
+        if (deceasedNode) deceasedNode.itemStyle.opacity = 0.15
       }
     }
 
@@ -1078,6 +1299,7 @@ onBeforeUnmount(() => {
   if (chartInstance) {
     chartInstance.dispose()
   }
+  clearMemberPhotos()
 })
 
 watch(displayMode, (newMode) => {
