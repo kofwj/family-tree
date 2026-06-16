@@ -431,50 +431,43 @@ function computeLayout(members, centerId) {
   const coords = new Map()
 
   // Root is at center
-  coords.set(centerId, { r: 0, thetaDegrees: 0 })
+  coords.set(Number(centerId), { r: 0, thetaDegrees: 0 })
 
   // Children of root
-  const rootChildren = bfsChildren.get(centerId) || []
-  const rootMember = memberById.get(centerId)
+  const rootChildren = bfsChildren.get(Number(centerId)) || []
+  const rootMember = memberById.get(Number(centerId))
   
   // Helper to determine sector assignment in radians
   function getSectorRange(m) {
     if (!m) return [0, 2 * Math.PI]
-    const isParent = m.id === rootMember.fatherId || m.id === rootMember.motherId
+    const isParent = Number(m.id) === Number(rootMember.fatherId) || Number(m.id) === Number(rootMember.motherId)
     if (isParent) return [Math.PI / 3, 2 * Math.PI / 3] // 60 to 120 deg (top)
     
-    const isSpouse = Array.isArray(rootMember.spouseIds) && rootMember.spouseIds.includes(m.id)
+    const isSpouse = Array.isArray(rootMember.spouseIds) && rootMember.spouseIds.map(Number).includes(Number(m.id))
     if (isSpouse) return [-Math.PI / 6, Math.PI / 4] // -30 to 45 deg (right)
     
-    const isSibling = (m.fatherId && m.fatherId === rootMember.fatherId) || 
-                      (m.motherId && m.motherId === rootMember.motherId)
+    const isSibling = (m.fatherId && Number(m.fatherId) === Number(rootMember.fatherId)) || 
+                      (m.motherId && Number(m.motherId) === Number(rootMember.motherId))
     if (isSibling) return [Math.PI, 5 * Math.PI / 4] // 180 to 225 deg (left-bottom)
     
-    const isChild = m.fatherId === rootMember.id || m.motherId === rootMember.id
+    const isChild = Number(m.fatherId) === Number(rootMember.id) || Number(m.motherId) === Number(rootMember.id)
     if (isChild) return [4 * Math.PI / 3, 11 * Math.PI / 6] // 240 to 330 deg (bottom)
     
     return [Math.PI / 4, Math.PI / 3]
   }
 
-  // Assign angles recursively
-  for (const childId of rootChildren) {
-    const child = memberById.get(childId)
-    const range = getSectorRange(child)
-    assignAngles(childId, range[0], range[1], RingWidth)
-  }
-
   function assignAngles(nodeId, thetaMin, thetaMax, r) {
     const theta = (thetaMin + thetaMax) / 2
     const thetaDegrees = theta * 180 / Math.PI
-    coords.set(nodeId, { r, thetaDegrees })
+    coords.set(Number(nodeId), { r, thetaDegrees })
 
-    const children = bfsChildren.get(nodeId) || []
+    const children = bfsChildren.get(Number(nodeId)) || []
     if (children.length === 0) return
 
     const span = thetaMax - thetaMin
     const step = span / children.length
     
-    const childrenMembers = children.map(cid => memberById.get(cid))
+    const childrenMembers = children.map(cid => memberById.get(cid)).filter(Boolean)
     childrenMembers.sort((a, b) => {
       const birthA = a.birthDate || a.birthDateText || ''
       const birthB = b.birthDate || b.birthDateText || ''
@@ -490,7 +483,7 @@ function computeLayout(members, centerId) {
         const nextChild = childrenMembers[i + 1]
         const date1 = child.birthDate || child.birthDateText
         const date2 = nextChild.birthDate || nextChild.birthDateText
-        if (date1 && date1 === date2 && child.fatherId === nextChild.fatherId && child.motherId === nextChild.motherId) {
+        if (date1 && date1 === date2 && child.fatherId && Number(child.fatherId) === Number(nextChild.fatherId) && child.motherId && Number(child.motherId) === Number(nextChild.motherId)) {
           isTwin = true
         }
       }
@@ -511,6 +504,90 @@ function computeLayout(members, centerId) {
       }
     }
   }
+
+  function partitionSector(nodesList, thetaMin, thetaMax, r) {
+    if (nodesList.length === 0) return
+
+    const span = thetaMax - thetaMin
+    const step = span / nodesList.length
+    
+    let currentThetaMin = thetaMin
+    for (let i = 0; i < nodesList.length; i++) {
+      const member = nodesList[i]
+      
+      let isTwin = false
+      if (i < nodesList.length - 1) {
+        const nextMember = nodesList[i + 1]
+        const date1 = member.birthDate || member.birthDateText
+        const date2 = nextMember.birthDate || nextMember.birthDateText
+        if (date1 && date1 === date2 && member.fatherId && Number(member.fatherId) === Number(nextMember.fatherId) && member.motherId && Number(member.motherId) === Number(nextMember.motherId)) {
+          isTwin = true
+        }
+      }
+      
+      if (isTwin) {
+        const twin1 = member
+        const twin2 = nodesList[i + 1]
+        
+        const midTheta = currentThetaMin + step / 2
+        assignAngles(twin1.id, currentThetaMin, midTheta, r)
+        assignAngles(twin2.id, midTheta, currentThetaMin + step, r)
+        
+        i++
+        currentThetaMin += step
+      } else {
+        assignAngles(member.id, currentThetaMin, currentThetaMin + step, r)
+        currentThetaMin += step
+      }
+    }
+  }
+
+  // Categorize direct neighbors of the root member to avoid overlap at Ring 1
+  const parentsList = []
+  const spousesList = []
+  const siblingsList = []
+  const childrenList = []
+  const othersList = []
+
+  for (const childId of rootChildren) {
+    const child = memberById.get(childId)
+    if (!child) continue
+    const cid = Number(child.id)
+    const isParent = cid === Number(rootMember.fatherId) || cid === Number(rootMember.motherId)
+    const isSpouse = Array.isArray(rootMember.spouseIds) && rootMember.spouseIds.map(Number).includes(cid)
+    const isSibling = (child.fatherId && Number(child.fatherId) === Number(rootMember.fatherId)) || 
+                      (child.motherId && Number(child.motherId) === Number(rootMember.motherId))
+    const isChild = Number(child.fatherId) === Number(rootMember.id) || Number(child.motherId) === Number(rootMember.id)
+
+    if (isParent) parentsList.push(child)
+    else if (isSpouse) spousesList.push(child)
+    else if (isSibling) siblingsList.push(child)
+    else if (isChild) childrenList.push(child)
+    else othersList.push(child)
+  }
+
+  // Sort lists
+  if (Array.isArray(rootMember.spouseIds)) {
+    const spouseIdNums = rootMember.spouseIds.map(Number)
+    spousesList.sort((a, b) => spouseIdNums.indexOf(Number(a.id)) - spouseIdNums.indexOf(Number(b.id)))
+  }
+  siblingsList.sort((a, b) => {
+    const birthA = a.birthDate || a.birthDateText || ''
+    const birthB = b.birthDate || b.birthDateText || ''
+    return birthA.localeCompare(birthB)
+  })
+  childrenList.sort((a, b) => {
+    const birthA = a.birthDate || a.birthDateText || ''
+    const birthB = b.birthDate || b.birthDateText || ''
+    return birthA.localeCompare(birthB)
+  })
+
+  // Partition sectors
+  partitionSector(parentsList, Math.PI / 3, 2 * Math.PI / 3, RingWidth)
+  partitionSector(spousesList, -Math.PI / 6, Math.PI / 4, RingWidth)
+  partitionSector(siblingsList, Math.PI, 5 * Math.PI / 4, RingWidth)
+  partitionSector(childrenList, 4 * Math.PI / 3, 11 * Math.PI / 6, RingWidth)
+  partitionSector(othersList, Math.PI / 4, Math.PI / 3, RingWidth)
 
   // Formulate ECharts nodes and links
   const echartsNodes = []
