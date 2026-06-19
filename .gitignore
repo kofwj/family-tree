@@ -29,11 +29,11 @@ node_modules/
 dist/
 
 # Runtime data: contains private family records and backups
-data/*.db
-data/*.sqlite
-data/*.sqlite3
-data/backups/
-data/member-photos/
+**/data/*.db
+**/data/*.sqlite
+**/data/*.sqlite3
+**/data/backups/
+**/data/member-photos/
 backups/
 
 # Import/export runtime files

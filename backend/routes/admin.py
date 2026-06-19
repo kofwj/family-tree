@@ -318,9 +318,7 @@ async def upload_backup(file: UploadFile, user: main.User = Depends(main.require
         raise HTTPException(400, '非法的文件路径')
     
     try:
-        content = await file.read()
-        with open(target_path, 'wb') as f:
-            f.write(content)
+        main.save_limited_upload(file, target_path, main.BACKUP_MAX_BYTES, label='备份文件')
         
         main.validate_sqlite_backup_file(target_path)
         
@@ -328,7 +326,7 @@ async def upload_backup(file: UploadFile, user: main.User = Depends(main.require
             main.write_audit_log(
                 audit_session, user, 'backup.upload',
                 target_type='backup', target_id=safe_filename, target_label=safe_filename,
-                detail={'originalFilename': file.filename, 'size': len(content)}
+                detail={'originalFilename': file.filename, 'size': target_path.stat().st_size}
             )
             audit_session.commit()
         
@@ -336,7 +334,7 @@ async def upload_backup(file: UploadFile, user: main.User = Depends(main.require
             'ok': True,
             'filename': safe_filename,
             'originalFilename': file.filename,
-            'size': len(content)
+            'size': target_path.stat().st_size
         }
     except HTTPException:
         target_path.unlink(missing_ok=True)

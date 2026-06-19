@@ -136,7 +136,8 @@ def add_family_user(family_id: int, payload: Dict[str, Any], user: main.User = D
             raise HTTPException(status_code=404, detail='家族不存在')
         
         target_user_id = payload.get('userId')
-        role = payload.get('role', 'viewer')
+        role = payload.get('role') or 'viewer'
+        main.validate_role(role)
         
         if not target_user_id:
             raise HTTPException(status_code=400, detail='缺少 userId 参数')
