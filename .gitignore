@@ -44,6 +44,7 @@ import/*.xls
 # Generated templates / temp helper patches
 data/members-import-template.xlsx
 .tmp_*.py
+scratch_members.json
 
 # Logs
 *.log
