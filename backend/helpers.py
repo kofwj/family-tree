@@ -90,20 +90,7 @@ from backend.auth import (
     require_capability
 )
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    init_db()
-    yield
 
-
-app = FastAPI(title='Family Tree System', version='1.0.0', lifespan=lifespan)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[os.getenv('CORS_ORIGIN', 'http://localhost:8088'), 'http://localhost:5173', 'http://localhost:8088'],
-    allow_credentials=True,
-    allow_methods=['*'],
-    allow_headers=['*'],
-)
 
 MEMBER_SQLITE_EXTRA_COLUMNS = {
     'former_name': 'TEXT',
@@ -1131,8 +1118,9 @@ def can_edit_family(session: Session, user: User, family_id: int) -> bool:
 
 def can_view_family(session: Session, user: User, family_id: int) -> bool:
     """Check if user can view a specific family."""
-    # Everyone can view by default, unless family-level restrictions are implemented later
-    return True
+    if user.role in ('super_admin', 'admin'):
+        return True
+    return get_user_family_role(session, user, family_id) is not None
 
 def require_family_edit_permission(family_id: int):
     """Dependency to check family edit permission."""

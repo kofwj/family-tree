@@ -7,11 +7,13 @@ import backend.main as main
 router = APIRouter(tags=["families"])
 
 @router.get('/families')
-def get_families(user: main.User = Depends(main.require_capability('family.view'))):
+def get_families(user: main.User = Depends(main.get_current_user)):
     with Session(main.engine) as session:
         families = session.exec(select(main.FamilyGroup).where(main.FamilyGroup.is_active == True)).all()
         result = []
         for f in families:
+            if not main.can_view_family(session, user, f.id):
+                continue
             member_count = len(session.exec(select(main.Member).where(main.Member.primary_family_id == f.id)).all())
             result.append({
                 'id': f.id,
@@ -31,11 +33,14 @@ def get_families(user: main.User = Depends(main.require_capability('family.view'
         return result
 
 @router.get('/families/{family_id}')
-def get_family(family_id: int, user: main.User = Depends(main.require_capability('family.view'))):
+def get_family(family_id: int, user: main.User = Depends(main.get_current_user)):
     with Session(main.engine) as session:
         family = session.get(main.FamilyGroup, family_id)
         if not family:
             raise HTTPException(status_code=404, detail='家族不存在')
+        
+        if not main.can_view_family(session, user, family_id):
+            raise HTTPException(status_code=403, detail='当前账号无权查看该家族')
         
         # Count members in this family
         member_count = len(session.exec(select(main.Member).where(main.Member.primary_family_id == family_id)).all())
@@ -99,9 +104,12 @@ def update_family(family_id: int, payload: Dict[str, Any], user: main.User = Dep
         }
 
 @router.get('/families/{family_id}/users')
-def get_family_users(family_id: int, user: main.User = Depends(main.require_capability('family.view'))):
+def get_family_users(family_id: int, user: main.User = Depends(main.get_current_user)):
     """Get all users with roles in this family."""
     with Session(main.engine) as session:
+        if not main.can_view_family(session, user, family_id):
+            raise HTTPException(status_code=403, detail='当前账号无权查看该家族的用户列表')
+        
         family = session.get(main.FamilyGroup, family_id)
         if not family:
             raise HTTPException(status_code=404, detail='家族不存在')
