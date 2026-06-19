@@ -8,10 +8,9 @@ export default defineConfig({
       output: {
         manualChunks(id) {
           if (!id.includes('node_modules')) return
-          if (id.includes('/node_modules/vue') || id.includes('/node_modules/@vue/') || id.includes('/node_modules/vue-router/')) return 'vendor-vue'
-          if (id.includes('/node_modules/element-plus/') || id.includes('/node_modules/@element-plus/')) return 'vendor-element-plus'
-          if (id.includes('/node_modules/@floating-ui/') || id.includes('/node_modules/@popperjs/') || id.includes('/node_modules/@vueuse/')) return 'vendor-element-plus'
-          if (id.includes('/node_modules/async-validator/') || id.includes('/node_modules/dayjs/')) return 'vendor-element-plus'
+          if (id.includes('/node_modules/vue/') || id.includes('/node_modules/@vue/') || id.includes('/node_modules/vue-router/')) return 'vendor-vue'
+          if (id.includes('/node_modules/echarts/') || id.includes('/node_modules/zrender/')) return 'vendor-echarts'
+          if (id.includes('/node_modules/leaflet/')) return 'vendor-leaflet'
           if (id.includes('/node_modules/@vue-flow/') || id.includes('/node_modules/dagre/')) return 'vendor-tree'
           if (id.includes('/node_modules/axios/')) return 'vendor-axios'
           return 'vendor'

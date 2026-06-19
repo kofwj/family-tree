@@ -3,7 +3,7 @@ import base64
 import hashlib
 import hmac
 from typing import Optional, Dict, Any, Set
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Request
 from fastapi.security import OAuth2PasswordBearer
 from jose import jwt, JWTError
 from sqlmodel import Session, select
@@ -14,7 +14,7 @@ from backend.database import (
 )
 from backend.models import User
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl='/auth/login')
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl='/auth/login', auto_error=False)
 
 ROLE_LABELS = {
     'super_admin': '超级管理员',
@@ -71,15 +71,20 @@ def verify_password(password: str, password_hash: str) -> bool:
 def get_user_capabilities(user: User) -> Set[str]:
     return set(ROLE_CAPABILITIES.get(user.role, ROLE_CAPABILITIES['viewer']))
 
-def get_current_user(token: str = Depends(oauth2_scheme)) -> User:
+def get_current_user(request: Request, token: Optional[str] = Depends(oauth2_scheme)) -> User:
+    import backend.main as main
+    cookie_token = request.cookies.get('access_token')
+    token_to_use = cookie_token or token
+    if not token_to_use:
+        raise HTTPException(status_code=401, detail='登录状态无效')
     try:
-        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALG])
+        payload = jwt.decode(token_to_use, main.JWT_SECRET, algorithms=[JWT_ALG])
         username = payload.get('sub')
         if not username:
             raise HTTPException(status_code=401, detail='登录状态无效')
     except JWTError:
         raise HTTPException(status_code=401, detail='登录状态无效')
-    with Session(engine) as session:
+    with Session(main.engine) as session:
         user = session.exec(select(User).where(User.username == username)).first()
         if not user or not user.is_active:
             raise HTTPException(status_code=401, detail='账号不存在或已停用')

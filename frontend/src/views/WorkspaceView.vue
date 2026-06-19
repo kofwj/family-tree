@@ -1071,7 +1071,12 @@ async function uploadBackup(file) {
   }
 }
 
-function logout() {
+async function logout() {
+  try {
+    await api.post('/auth/logout')
+  } catch {
+    // ignore
+  }
   localStorage.removeItem('token')
   currentUser.value = { id: 0, username: '', displayName: '访客', role: 'viewer', capabilities: [], isActive: true, memberId: null }
   router.push('/login')

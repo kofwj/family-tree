@@ -55,7 +55,12 @@ const settings = ref({
 function goWorkspace() {
   router.push('/workspace')
 }
-function goLogin() {
+async function goLogin() {
+  try {
+    await api.post('/auth/logout')
+  } catch {
+    // ignore failures
+  }
   localStorage.removeItem('token')
   router.push('/login')
 }

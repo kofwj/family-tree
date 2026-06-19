@@ -39,9 +39,17 @@ async def lifespan(app: FastAPI):
     yield
 
 app = FastAPI(title='Family Tree System', version='1.0.0', lifespan=lifespan)
+
+if RUNNING_IN_CONTAINER:
+    # Strict production origins
+    allow_origins = [os.getenv('CORS_ORIGIN', 'http://localhost:8088')]
+else:
+    # Dev origins
+    allow_origins = [os.getenv('CORS_ORIGIN', 'http://localhost:8088'), 'http://localhost:5173', 'http://localhost:8088']
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[os.getenv('CORS_ORIGIN', 'http://localhost:8088'), 'http://localhost:5173', 'http://localhost:8088'],
+    allow_origins=allow_origins,
     allow_credentials=True,
     allow_methods=['*'],
     allow_headers=['*'],

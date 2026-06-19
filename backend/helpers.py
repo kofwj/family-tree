@@ -845,19 +845,6 @@ def audit_log_payload(row: AuditLog) -> Dict[str, Any]:
         'createdAt': row.created_at,
     }
 
-def get_current_user(token: str = Depends(oauth2_scheme)) -> User:
-    try:
-        payload = jwt.decode(token, main.JWT_SECRET, algorithms=[JWT_ALG])
-        username = payload.get('sub')
-        if not username:
-            raise HTTPException(status_code=401, detail='登录状态无效')
-    except JWTError:
-        raise HTTPException(status_code=401, detail='登录状态无效')
-    with Session(main.engine) as session:
-        user = session.exec(select(User).where(User.username == username)).first()
-        if not user or not user.is_active:
-            raise HTTPException(status_code=401, detail='账号不存在或已停用')
-        return user
 
 def is_unrestricted_user(user: User) -> bool:
     return user.role in {'super_admin', 'admin'}

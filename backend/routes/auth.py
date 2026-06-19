@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Response
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlmodel import Session, select
 import backend.main as main
@@ -7,7 +7,7 @@ from backend.schemas import Token, CurrentUserOut
 router = APIRouter(tags=["auth"])
 
 @router.post('/auth/login', response_model=Token)
-def login(request: Request, form: OAuth2PasswordRequestForm = Depends()):
+def login(request: Request, response: Response, form: OAuth2PasswordRequestForm = Depends()):
     main.check_login_rate_limit(request, form.username)
     with Session(main.engine) as session:
         user = session.exec(select(main.User).where(main.User.username == form.username)).first()
@@ -19,7 +19,21 @@ def login(request: Request, form: OAuth2PasswordRequestForm = Depends()):
         main.write_audit_log(session, user, 'auth.login', target_type='user', target_id=user.id, target_label=user.username)
         session.add(user)
         session.commit()
-        return Token(access_token=main.create_token(user))
+        token_str = main.create_token(user)
+        response.set_cookie(
+            key="access_token",
+            value=token_str,
+            httponly=True,
+            secure=True,
+            samesite="lax",
+            path="/"
+        )
+        return Token(access_token=token_str)
+
+@router.post('/auth/logout')
+def logout(response: Response):
+    response.delete_cookie(key="access_token", path="/")
+    return {'ok': True}
 
 @router.get('/me', response_model=CurrentUserOut)
 def me(user: main.User = Depends(main.get_current_user)):
