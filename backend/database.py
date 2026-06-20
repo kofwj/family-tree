@@ -1,4 +1,5 @@
 import os
+import sys
 from pathlib import Path
 from zoneinfo import ZoneInfo
 from typing import Dict, Any
@@ -6,15 +7,13 @@ from sqlmodel import create_engine, Session
 
 DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///./data/family.db')
 RUNNING_IN_CONTAINER = Path('/app').exists()
-INSECURE_JWT_SECRETS = {'', 'change-me-in-production', 'please-change-this-secret'}
+INSECURE_JWT_SECRETS = {'', 'change-me-in-production', 'please-change-this-secret', 'dev-only-family-tree-secret'}
+
+# SECURE_COOKIE & IS_TESTING
+SECURE_COOKIE = os.getenv('SECURE_COOKIE', 'false').lower() == 'true'
+IS_TESTING = os.getenv('TESTING') == '1' or 'pytest' in sys.modules or os.getenv('PYTEST_CURRENT_TEST') is not None
 
 JWT_SECRET = os.getenv('JWT_SECRET', '')
-if RUNNING_IN_CONTAINER and JWT_SECRET in INSECURE_JWT_SECRETS:
-    raise RuntimeError('JWT_SECRET must be set to a strong non-default value in production')
-if JWT_SECRET in INSECURE_JWT_SECRETS:
-    JWT_SECRET = 'dev-only-family-tree-secret'
-JWT_ALG = 'HS256'
-
 PASSWORD_MIN_LENGTH = int(os.getenv('PASSWORD_MIN_LENGTH', '10'))
 PHOTO_MAX_BYTES = int(os.getenv('PHOTO_MAX_BYTES', str(5 * 1024 * 1024)))
 EXCEL_MAX_BYTES = int(os.getenv('EXCEL_MAX_BYTES', str(10 * 1024 * 1024)))
@@ -34,10 +33,19 @@ def is_strong_password_value(password: str) -> bool:
     return has_letter and has_digit
 
 ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD', '')
-if RUNNING_IN_CONTAINER and (not ADMIN_PASSWORD or ADMIN_PASSWORD == 'admin123' or not is_strong_password_value(ADMIN_PASSWORD)):
-    raise RuntimeError(f'ADMIN_PASSWORD must be set to a strong non-default value with at least {PASSWORD_MIN_LENGTH} chars including letters and digits')
-if not ADMIN_PASSWORD:
-    ADMIN_PASSWORD = 'admin123'
+
+if not IS_TESTING:
+    if not JWT_SECRET or JWT_SECRET in INSECURE_JWT_SECRETS:
+        raise RuntimeError('JWT_SECRET must be set to a strong non-default value in environment variables')
+    if not ADMIN_PASSWORD or ADMIN_PASSWORD == 'admin123' or not is_strong_password_value(ADMIN_PASSWORD):
+        raise RuntimeError(f'ADMIN_PASSWORD must be set to a strong non-default value with at least {PASSWORD_MIN_LENGTH} chars including letters and digits')
+else:
+    if not JWT_SECRET:
+        JWT_SECRET = 'dev-only-family-tree-secret'
+    if not ADMIN_PASSWORD:
+        ADMIN_PASSWORD = 'admin123'
+
+JWT_ALG = 'HS256'
 
 DATA_DIR = Path('/app/data') if RUNNING_IN_CONTAINER else Path('./data')
 BACKUP_DIR = DATA_DIR / 'backups'

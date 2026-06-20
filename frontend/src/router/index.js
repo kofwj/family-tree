@@ -15,7 +15,7 @@ const router = createRouter({
 })
 
 router.beforeEach((to) => {
-  const authed = !!localStorage.getItem('token')
+  const authed = localStorage.getItem('isAuthenticated') === 'true'
   if (to.path === '/workspace' && !authed) return '/login'
   if (to.path === '/login' && authed) return '/'
 })

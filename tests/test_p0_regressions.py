@@ -27,6 +27,7 @@ def test_member_photo_requires_member_visibility(client):
     assert uploaded.status_code == 200, uploaded.text
     photo_path = uploaded.json()["photoUrl"]
 
+    client.cookies.clear()
     anonymous = client.get(photo_path.replace("/api", ""))
     assert anonymous.status_code in (401, 403)
 

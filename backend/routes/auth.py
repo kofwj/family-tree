@@ -24,7 +24,7 @@ def login(request: Request, response: Response, form: OAuth2PasswordRequestForm 
             key="access_token",
             value=token_str,
             httponly=True,
-            secure=True,
+            secure=main.SECURE_COOKIE,
             samesite="lax",
             path="/"
         )
@@ -32,7 +32,13 @@ def login(request: Request, response: Response, form: OAuth2PasswordRequestForm 
 
 @router.post('/auth/logout')
 def logout(response: Response):
-    response.delete_cookie(key="access_token", path="/")
+    response.delete_cookie(
+        key="access_token",
+        path="/",
+        secure=main.SECURE_COOKIE,
+        httponly=True,
+        samesite="lax"
+    )
     return {'ok': True}
 
 @router.get('/me', response_model=CurrentUserOut)

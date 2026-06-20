@@ -156,3 +156,180 @@ def test_family_role_invalid_value_returns_400(client, app_module):
         headers=auth_headers(token),
     )
     assert response_valid.status_code == 200
+
+
+def test_cookie_attributes(client, app_module, monkeypatch):
+    # Test case 1: SECURE_COOKIE = True
+    monkeypatch.setattr(app_module, "SECURE_COOKIE", True, raising=False)
+    response = client.post("/auth/login", data={"username": "admin", "password": "TestPass123"})
+    assert response.status_code == 200
+    cookies = response.headers.get("set-cookie", "")
+    assert "access_token=" in cookies
+    assert "Secure" in cookies
+    assert "HttpOnly" in cookies
+    assert "samesite=lax" in cookies.lower()
+    assert "path=/" in cookies.lower()
+
+    # Test case 2: SECURE_COOKIE = False
+    monkeypatch.setattr(app_module, "SECURE_COOKIE", False, raising=False)
+    response2 = client.post("/auth/login", data={"username": "admin", "password": "TestPass123"})
+    assert response2.status_code == 200
+    cookies2 = response2.headers.get("set-cookie", "")
+    assert "access_token=" in cookies2
+    assert "Secure" not in cookies2
+    assert "HttpOnly" in cookies2
+    assert "samesite=lax" in cookies2.lower()
+    assert "path=/" in cookies2.lower()
+
+
+def test_cookie_session_bootstrap(client):
+    # Log in and let client capture cookie
+    response = client.post("/auth/login", data={"username": "admin", "password": "TestPass123"})
+    assert response.status_code == 200
+    
+    # Verify that requesting /me without Authorization header succeeds using the cookie
+    me_resp = client.get("/me")
+    assert me_resp.status_code == 200
+    assert me_resp.json()["username"] == "admin"
+
+    # Verify that requesting /members works using the cookie
+    members_resp = client.get("/members")
+    assert members_resp.status_code == 200
+
+
+def test_ancestry_privacy_and_truncation(client, app_module):
+    # Create members A -> B -> C (A is grandparent, B is parent, C is child)
+    with app_module.Session(app_module.engine) as session:
+        viewer_user = app_module.User(
+            username="viewer_ancestry",
+            display_name="Viewer Ancestry",
+            password_hash=app_module.hash_password("ViewerPass123"),
+            role="viewer",
+            is_active=True
+        )
+        session.add(viewer_user)
+
+        family = app_module.FamilyGroup(name="张氏支系", surname="张", is_active=True)
+        session.add(family)
+        session.commit()
+        session.refresh(viewer_user)
+        session.refresh(family)
+
+        # Create members
+        a = app_module.Member(name="祖先A", gender="男", primary_family_id=family.id, privacy_level="public")
+        session.add(a)
+        session.commit()
+        session.refresh(a)
+
+        b = app_module.Member(name="父亲B", gender="男", father_id=a.id, primary_family_id=family.id, privacy_level="private")
+        session.add(b)
+        session.commit()
+        session.refresh(b)
+
+        c = app_module.Member(name="孩子C", gender="男", father_id=b.id, primary_family_id=family.id, privacy_level="public")
+        session.add(c)
+        session.commit()
+        session.refresh(c)
+
+        viewer_user.member_id = c.id
+        session.add(viewer_user)
+        
+        role = app_module.UserFamilyRole(user_id=viewer_user.id, family_id=family.id, role="viewer")
+        session.add(role)
+        session.commit()
+        
+        c_id = c.id
+        b_id = b.id
+        viewer_id = viewer_user.id
+
+    viewer_token = login(client, username="viewer_ancestry", password="ViewerPass123")
+
+    # Querying other member should return 403 Forbidden
+    with app_module.Session(app_module.engine) as session:
+        other_fam = app_module.FamilyGroup(name="李氏支系", surname="李", is_active=True)
+        session.add(other_fam)
+        session.commit()
+        session.refresh(other_fam)
+        other_member = app_module.Member(name="李某", gender="男", primary_family_id=other_fam.id, privacy_level="public")
+        session.add(other_member)
+        session.commit()
+        session.refresh(other_member)
+        other_member_id = other_member.id
+
+    response_403 = client.get(f"/members/{other_member_id}/ancestry", headers=auth_headers(viewer_token))
+    assert response_403.status_code == 403
+
+    # Now let's test hard truncation (Scheme A)
+    with app_module.Session(app_module.engine) as session:
+        db_b = session.get(app_module.Member, b_id)
+        db_b.privacy_level = "admin"
+        session.add(db_b)
+        session.commit()
+
+    # Query ancestry of C: B is invisible ("admin"), so B is truncated, and A (father of B) is also truncated!
+    response_trunc = client.get(f"/members/{c_id}/ancestry", headers=auth_headers(viewer_token))
+    assert response_trunc.status_code == 200
+    res_data = response_trunc.json()
+    assert res_data["lines"]["paternal"] == []
+
+
+def test_startup_side_effects(client, app_module, monkeypatch):
+    import backend.helpers
+    auto_org_called = False
+    heal_called = False
+
+    def mock_auto_org(session):
+        nonlocal auto_org_called
+        auto_org_called = True
+
+    def mock_heal(session):
+        nonlocal heal_called
+        heal_called = True
+
+    monkeypatch.setattr(backend.helpers, "run_auto_organization", mock_auto_org)
+    monkeypatch.setattr(backend.helpers, "heal_unlinked_relations", mock_heal)
+
+    # Test case 1: env is unset -> should not be called
+    monkeypatch.setenv("AUTO_ORGANIZE_ON_STARTUP", "")
+    app_module.init_db()
+    assert not auto_org_called
+    assert not heal_called
+
+    # Test case 2: env is set to 'true' -> should be called
+    monkeypatch.setenv("AUTO_ORGANIZE_ON_STARTUP", "true")
+    app_module.init_db()
+    assert auto_org_called
+    assert heal_called
+
+
+def test_fail_fast_credentials(monkeypatch):
+    import subprocess
+    import sys
+    import os
+
+    env = os.environ.copy()
+    env["JWT_SECRET"] = ""
+    env["ADMIN_PASSWORD"] = ""
+    env.pop("TESTING", None)
+    env.pop("PYTEST_CURRENT_TEST", None)
+    
+    res = subprocess.run(
+        [sys.executable, "-c", "import sys; sys.path.insert(0, '.'); import backend.database"],
+        cwd="/Users/jian/Downloads/family-tree-system",
+        capture_output=True,
+        text=True,
+        env=env
+    )
+    assert res.returncode != 0
+    assert "RuntimeError" in res.stderr
+
+    env_test = env.copy()
+    env_test["TESTING"] = "1"
+    res_test = subprocess.run(
+        [sys.executable, "-c", "import sys; sys.path.insert(0, '.'); import backend.database"],
+        cwd="/Users/jian/Downloads/family-tree-system",
+        capture_output=True,
+        text=True,
+        env=env_test
+    )
+    assert res_test.returncode == 0

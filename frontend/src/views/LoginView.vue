@@ -55,7 +55,7 @@ async function login() {
     fd.append('username', form.value.username)
     fd.append('password', form.value.password)
     const { data } = await api.post('/auth/login', fd)
-    localStorage.setItem('token', data.access_token)
+    localStorage.setItem('isAuthenticated', 'true')
     router.push('/workspace')
   } catch (e) {
     err.value = e?.response?.data?.detail || '登录失败，请检查账号密码'

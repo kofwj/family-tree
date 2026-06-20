@@ -10,7 +10,7 @@ from backend.database import (
     connect_args, engine, get_db, JWT_SECRET, JWT_ALG, PASSWORD_MIN_LENGTH,
     PHOTO_MAX_BYTES, EXCEL_MAX_BYTES, BACKUP_MAX_BYTES, LOGIN_RATE_LIMIT_MAX,
     LOGIN_RATE_LIMIT_WINDOW_SECONDS, LOGIN_RATE_LIMIT_LOCK_SECONDS,
-    LOGIN_ATTEMPTS, ADMIN_PASSWORD
+    LOGIN_ATTEMPTS, ADMIN_PASSWORD, SECURE_COOKIE
 )
 
 # Import models & schemas for tests/other files that reference them from main.py

@@ -61,12 +61,13 @@ async function goLogin() {
   } catch {
     // ignore failures
   }
-  localStorage.removeItem('token')
+  localStorage.removeItem('isAuthenticated')
   router.push('/login')
 }
 
 onMounted(async () => {
-  isAuthenticated.value = !!localStorage.getItem('token')
+  const localAuthHint = localStorage.getItem('isAuthenticated') === 'true'
+  isAuthenticated.value = localAuthHint
 
   try {
     const { data } = await api.get('/public-settings')
@@ -75,16 +76,24 @@ onMounted(async () => {
     // ignore public settings failure and keep defaults
   }
 
-  if (!isAuthenticated.value) return
+  if (!localAuthHint) return
 
   try {
+    // Session bootstrap verification
+    await api.get('/me')
+    isAuthenticated.value = true
+    localStorage.setItem('isAuthenticated', 'true')
+
     const [m, t] = await Promise.all([api.get('/members'), api.get('/tree')])
     const members = m.data || []
     const roots = t.data || []
     const generations = new Set(members.map(x => x.generation).filter(Boolean)).size
     stats.value = { members: members.length, generations, roots: roots.length }
-  } catch {
-    // ignore
+  } catch (e) {
+    if (e?.response?.status === 401) {
+      isAuthenticated.value = false
+      localStorage.removeItem('isAuthenticated')
+    }
   }
 })
 </script>

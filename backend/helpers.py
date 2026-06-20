@@ -526,8 +526,15 @@ def init_db():
     with Session(main.engine) as session:
         ensure_default_family_group(session)
         ensure_member_primary_family(session)
-        run_auto_organization(session)
-        heal_unlinked_relations(session)
+        
+        auto_org = os.getenv('AUTO_ORGANIZE_ON_STARTUP', 'false').lower() == 'true'
+        if auto_org:
+            print("[Startup] Auto organization and healing enabled by environment variable.")
+            run_auto_organization(session)
+            heal_unlinked_relations(session)
+        else:
+            print("[Startup] Auto organization and healing are disabled by default.")
+            
         ensure_default_admin(session)
 
 def hash_password(password: str) -> str:

@@ -1077,7 +1077,7 @@ async function logout() {
   } catch {
     // ignore
   }
-  localStorage.removeItem('token')
+  localStorage.removeItem('isAuthenticated')
   currentUser.value = { id: 0, username: '', displayName: '访客', role: 'viewer', capabilities: [], isActive: true, memberId: null }
   router.push('/login')
 }

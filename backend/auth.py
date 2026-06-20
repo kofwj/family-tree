@@ -74,7 +74,7 @@ def get_user_capabilities(user: User) -> Set[str]:
 def get_current_user(request: Request, token: Optional[str] = Depends(oauth2_scheme)) -> User:
     import backend.main as main
     cookie_token = request.cookies.get('access_token')
-    token_to_use = cookie_token or token
+    token_to_use = token or cookie_token
     if not token_to_use:
         raise HTTPException(status_code=401, detail='登录状态无效')
     try:

@@ -290,6 +290,10 @@ def get_member_ancestry(
         if not member:
             raise HTTPException(status_code=404, detail='成员不存在')
         
+        visibility = main.build_member_visibility(session, user)
+        if not main.can_view_member_with_visibility(user, member, visibility):
+            raise HTTPException(status_code=403, detail='当前账号无权访问该成员的祖源信息')
+            
         all_members = session.exec(select(main.Member)).all()
         by_id = {m.id: m for m in all_members if m.id is not None}
         
@@ -300,12 +304,28 @@ def get_member_ancestry(
                 if current_id is None or current_id not in by_id:
                     break
                 current = by_id[current_id]
-                line.append(main.member_to_dict(current, include_relations=False, by_id=by_id, all_members=all_members))
+                if not main.can_view_member_with_visibility(user, current, visibility):
+                    # Hard truncation: stop tracing this ancestral branch immediately
+                    break
+                
+                scope = main.member_visibility_scope(current.id, visibility)
+                default_visible_fields = main.resolve_visible_member_fields(session, user)
+                visible_fields = main.visible_fields_for_scope(default_visible_fields, scope)
+                
+                payload = main.member_to_dict(current, include_relations=False, visible_fields=visible_fields, by_id=by_id, all_members=all_members)
+                line.append(main.attach_visibility_payload(payload, scope))
                 current_id = parent_getter(current)
             return line
         
+        scope = main.member_visibility_scope(member.id, visibility)
+        default_visible_fields = main.resolve_visible_member_fields(session, user)
+        visible_fields = main.visible_fields_for_scope(default_visible_fields, scope)
+        
+        member_payload = main.member_to_dict(member, include_relations=False, visible_fields=visible_fields, by_id=by_id, all_members=all_members)
+        member_payload = main.attach_visibility_payload(member_payload, scope)
+        
         result = {
-            'member': main.member_to_dict(member, include_relations=False, by_id=by_id, all_members=all_members),
+            'member': member_payload,
             'lines': {}
         }
         
