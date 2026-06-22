@@ -1078,6 +1078,9 @@ async function logout() {
     // ignore
   }
   localStorage.removeItem('isAuthenticated')
+  if (router.resetSessionVerified) {
+    router.resetSessionVerified()
+  }
   currentUser.value = { id: 0, username: '', displayName: '访客', role: 'viewer', capabilities: [], isActive: true, memberId: null }
   router.push('/login')
 }

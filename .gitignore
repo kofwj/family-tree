@@ -45,6 +45,7 @@ import/*.xls
 data/members-import-template.xlsx
 .tmp_*.py
 scratch_members.json
+check_layout.py
 
 # Logs
 *.log
