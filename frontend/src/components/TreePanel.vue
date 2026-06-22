@@ -267,9 +267,8 @@ function initChart() {
         const parts = id.split('-')
         id = parts[parts.length - 1]
       }
-      if (!id.includes('midpoint')) {
-        setLocalFocus(id)
-        emit('node-click', id)
+      if (!id.includes('midpoint') && !id.includes('border-') && !id.includes('deceased-') && !id.includes('cc-')) {
+        setCenterMember(id)
       }
     }
   })
@@ -281,7 +280,7 @@ function initChart() {
         const parts = id.split('-')
         id = parts[parts.length - 1]
       }
-      if (!id.includes('midpoint')) {
+      if (!id.includes('midpoint') && !id.includes('border-') && !id.includes('deceased-') && !id.includes('cc-')) {
         setCenterMember(id)
       }
     }
@@ -438,9 +437,11 @@ function computeLayout(members, centerId) {
   }
 
   // BFS to assign distances and build spanning tree
+  // BFS to assign distances and build spanning tree
   const distance = new Map() // memberId -> distance (0, 1, 2...)
   const bfsParent = new Map() // memberId -> parentId in tree
   const bfsChildren = new Map() // memberId -> list of childIds in tree
+  const relationToCenter = new Map() // memberId -> relation string
   
   for (const mid of graph.keys()) {
     bfsChildren.set(mid, [])
@@ -448,11 +449,13 @@ function computeLayout(members, centerId) {
 
   const queue = [centerId]
   distance.set(centerId, 0)
+  relationToCenter.set(Number(centerId), '自己 (焦点)')
   const visited = new Set([centerId])
 
   while (queue.length > 0) {
     const curr = queue.shift()
     const dist = distance.get(curr)
+    const parentRelation = relationToCenter.get(Number(curr)) || ''
     
     const neighbors = Array.from(graph.get(curr) || [])
     
@@ -493,6 +496,38 @@ function computeLayout(members, centerId) {
         distance.set(n, dist + 1)
         bfsParent.set(n, curr)
         bfsChildren.get(curr).push(n)
+        
+        // Compute relationship path description
+        const currMember = memberById.get(Number(curr))
+        const nMember = memberById.get(Number(n))
+        let localRel = ''
+        if (currMember && nMember) {
+          const nId = Number(n)
+          if (currMember.fatherId && Number(currMember.fatherId) === nId) {
+            localRel = '父亲'
+          } else if (currMember.motherId && Number(currMember.motherId) === nId) {
+            localRel = '母亲'
+          } else if (Array.isArray(currMember.spouseIds) && currMember.spouseIds.map(Number).includes(nId)) {
+            localRel = '配偶'
+          } else if ((nMember.fatherId && Number(nMember.fatherId) === Number(curr)) || (nMember.motherId && Number(nMember.motherId) === Number(curr))) {
+            localRel = nMember.gender === '女' ? '女儿' : '儿子'
+          } else if ((currMember.fatherId && currMember.fatherId === nMember.fatherId) || (currMember.motherId && currMember.motherId === nMember.motherId)) {
+            localRel = '兄弟姐妹'
+          } else {
+            localRel = '亲属'
+          }
+        } else {
+          localRel = '亲属'
+        }
+        
+        let finalRel = ''
+        if (Number(curr) === Number(centerId)) {
+          finalRel = localRel
+        } else {
+          finalRel = `${parentRelation}的${localRel}`
+        }
+        relationToCenter.set(Number(n), finalRel)
+        
         queue.push(n)
       }
     }
@@ -773,7 +808,7 @@ function computeLayout(members, centerId) {
           textBorderColor: 'rgba(0,0,0,0.8)',
           textBorderWidth: 2.5
         },
-        rawMember: m
+        rawMember: { ...m, relation: relationToCenter.get(mid) || '亲属' }
       })
 
       // 3. Push deceased overlay if deceased (top layer)
@@ -832,7 +867,7 @@ function computeLayout(members, centerId) {
           textBorderColor: 'rgba(0,0,0,0.8)',
           textBorderWidth: 2.5
         },
-        rawMember: m
+        rawMember: { ...m, relation: relationToCenter.get(mid) || '亲属' }
       })
     }
   }
@@ -1262,6 +1297,9 @@ function renderChart() {
         const genderColor = data.gender === '女' ? '#ff85a2' : '#85a2ff'
         const spouse = (data.spouses || []).map(s => s.name).filter(Boolean).join('、') || data.spouse || '无'
         const lifespan = `${data.birthDate || data.birthDateText || '生年不详'}${data.deathDate || data.deathDateText ? ' ~ ' + (data.deathDate || data.deathDateText) : ''}`
+        const relation = data.relation || '亲属'
+        const occupation = data.occupation || '未填写'
+        const location = data.residence || data.birthPlace || '未填写'
         return `
           <div style="padding: 6px; font-family: system-ui, sans-serif; line-height: 1.6;">
             <div style="font-size: 15px; font-weight: bold; margin-bottom: 4px; border-bottom: 1px solid rgba(211,162,106,0.3); padding-bottom: 4px; display: flex; align-items: center; justify-content: space-between; gap: 20px;">
@@ -1271,13 +1309,16 @@ function renderChart() {
               </span>
             </div>
             <div style="font-size: 12px;">
+              <div><strong>关系：</strong>${relation}</div>
               <div><strong>世代：</strong>第 ${data.generation} 代 ${data.generationName ? `(${data.generationName}辈)` : ''}</div>
               <div><strong>排行：</strong>${data.rankTitle || '无'}</div>
               <div><strong>支系：</strong>${data.branch || '主脉'}</div>
               <div><strong>生卒：</strong>${lifespan}</div>
               <div><strong>配偶：</strong>${spouse}</div>
+              <div><strong>职业：</strong>${occupation}</div>
+              <div><strong>所在地：</strong>${location}</div>
               <div style="margin-top: 4px; font-size: 10px; color: rgba(255,255,255,0.5); border-top: 1px dashed rgba(255,255,255,0.15); padding-top: 4px;">
-                双击可将该成员设为关系圈中心
+                点击可将该成员设为关系圈中心
               </div>
             </div>
           </div>
