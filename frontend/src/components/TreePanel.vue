@@ -1372,14 +1372,21 @@ function resetToAncestor() {
 
 function setCenterMember(memberId) {
   if (!memberId) return
+  // Automatically switch to panorama (flow) mode
+  displayMode.value = 'flow'
+  
   const idValue = isNaN(Number(memberId)) ? memberId : Number(memberId)
   if (currentCenterMemberId.value !== idValue) {
     if (currentCenterMemberId.value) {
       centerHistoryStack.value.push(currentCenterMemberId.value)
     }
     currentCenterMemberId.value = idValue
-    renderChart()
   }
+  
+  // Wait for the sunburst-chart-canvas wrapper DOM to mount and render ECharts
+  nextTick(() => {
+    initChart()
+  })
 }
 
 defineExpose({

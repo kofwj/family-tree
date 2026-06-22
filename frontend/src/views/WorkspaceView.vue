@@ -368,6 +368,10 @@ function setCenterMember(memberId) {
   if (treePanelRef.value) {
     treePanelRef.value.setCenterMember(memberId)
   }
+  // Close the details drawer
+  drawer.value = false
+  // Switch to the main genealogy tab
+  tab.value = 'tree'
 }
 
 function openCreateForm() {
