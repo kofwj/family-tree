@@ -64,10 +64,17 @@ cp .env.example .env
 修改 `.env`：
 
 ```env
+# 必填安全凭据（非测试环境启动时会进行强密码/非默认密钥强校验，不合规将直接崩溃以防隐患）
 JWT_SECRET=replace-with-a-long-random-secret
 ADMIN_PASSWORD=replace-with-a-strong-admin-password
+
+# 可选配置项
 CORS_ORIGIN=http://localhost:8088
+SECURE_COOKIE=false              # 会话 Cookie 是否强制 Secure (HTTPS)。本地 HTTP 开发设为 false，生产环境建议设为 true
+AUTO_ORGANIZE_ON_STARTUP=false  # 启动时是否自动分类整理/修复未关联的数据。默认为 false，设为 true 可在每次启动时自动维护数据健康
 ```
+
+> ⚠️ **凭证安全强校验 (Fail-Fast)**：为防止生产环境使用弱默认密钥部署，在非测试模式（未设置 `TESTING=1`）下，若 `JWT_SECRET` 缺失或为默认弱密钥，或者 `ADMIN_PASSWORD` 缺失、为默认值 `admin123` 或强度不足（少于 10 位或未同时包含字母与数字），系统将在启动时直接抛出 `RuntimeError` 拒绝运行。
 
 建议生成 `JWT_SECRET`：
 
@@ -165,6 +172,9 @@ curl -fsS http://localhost:3000/health
 
 ## 隐私和数据安全
 
+- **HttpOnly Cookie 会话控制**：登录成功后，认证凭据以 HttpOnly、SameSite=Lax 的 Cookie (`access_token`) 形式传输和保存，前端不再向 `localStorage` 写入真实的 `access_token`。配合前端异步路由守卫的会话校验（`/api/me`），可完全抵御 XSS 劫持 Token，且无法通过 Console 篡改本地存储来绕过路由守卫。
+- **祖源查询隐私裁剪 (Scheme A 截断)**：在查询成员祖源关系链时，严格遵循家庭成员的 Visibility 校验。一旦追溯过程中遇到当前用户无权查看的祖先节点，将在此节点立即进行硬截断（其父辈祖先完全不可见），防止利用血缘关系越权探知隐藏成员。
+- **行政与成员配置权限收紧**：家族成员的权限管理（分配/删除用户角色）以及家族的结构性属性配置（修改根成员 `root_member_id`、主世系 `primary_line`、排序等）仅限全局管理员或本家族的 `admin` 角色执行，常规的编辑者（`editor`）仅被允许更新标题、简介等展示性元数据。
 - `/settings` 需要登录并具备 `settings.view` 权限；公开首页仅读取 `/public-settings` 的白名单字段。
 - 成员照片不再通过静态目录公开裸访问，`/member-photos/{filename}` 会校验登录状态、`member.view` 权限和成员可见范围。
 - Excel 替换导入使用单事务处理：导入失败会回滚旧数据；成功替换会清理成员相关引用、审核请求和用户绑定，避免孤儿数据。
