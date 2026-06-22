@@ -74,12 +74,22 @@ def update_family(family_id: int, payload: Dict[str, Any], user: main.User = Dep
         if not family:
             raise HTTPException(status_code=404, detail='家族不存在')
         
-        # Update allowed fields
-        allowed_fields = {'name', 'surname', 'site_title', 'cover_kicker', 'subtitle', 'description', 'root_member_id', 'primary_line', 'sort_order'}
+        # Update allowed fields based on role
+        all_family_fields = {'name', 'surname', 'site_title', 'cover_kicker', 'subtitle', 'description', 'root_member_id', 'primary_line', 'sort_order'}
+        if main.can_admin_family(session, user, family_id):
+            allowed_fields = all_family_fields
+        else:
+            allowed_fields = {'site_title', 'cover_kicker', 'subtitle', 'description'}
+        
         for key, value in payload.items():
             snake_key = ''.join(['_' + c.lower() if c.isupper() else c for c in key]).lstrip('_')
-            if snake_key in allowed_fields:
-                setattr(family, snake_key, value)
+            if snake_key in all_family_fields:
+                if snake_key not in allowed_fields:
+                    current_val = getattr(family, snake_key, None)
+                    if current_val != value:
+                        raise HTTPException(status_code=403, detail='当前账号无权编辑该家族的结构性属性')
+                else:
+                    setattr(family, snake_key, value)
         
         family.updated_at = datetime.now(timezone.utc).isoformat()
         session.add(family)

@@ -427,3 +427,66 @@ def test_family_editor_cannot_manage_users(client, app_module):
     )
     assert response_delete_ok.status_code == 200
 
+
+def test_family_editor_cannot_modify_structural_fields(client, app_module):
+    # 1. Create a family and a family-level editor user
+    with app_module.Session(app_module.engine) as session:
+        editor_user = app_module.User(
+            username="structural_editor_test",
+            display_name="Structural Editor",
+            password_hash=app_module.hash_password("EditorPass123"),
+            role="viewer",  # global role
+            is_active=True
+        )
+        session.add(editor_user)
+        
+        family = app_module.FamilyGroup(name="旧名称", surname="赵", is_active=True, root_member_id=1, primary_line="paternal")
+        session.add(family)
+        session.commit()
+        session.refresh(editor_user)
+        session.refresh(family)
+        
+        role_editor = app_module.UserFamilyRole(
+            user_id=editor_user.id,
+            family_id=family.id,
+            role="editor"
+        )
+        session.add(role_editor)
+        session.commit()
+        
+        family_id = family.id
+
+    editor_token = login(client, username="structural_editor_test", password="EditorPass123")
+
+    # 2. Attempt to modify structural fields (e.g. rootMemberId, name) - should be 403
+    response_root = client.put(
+        f"/families/{family_id}",
+        json={"rootMemberId": 999},
+        headers=auth_headers(editor_token)
+    )
+    assert response_root.status_code == 403
+
+    response_name = client.put(
+        f"/families/{family_id}",
+        json={"name": "新名称"},
+        headers=auth_headers(editor_token)
+    )
+    assert response_name.status_code == 403
+
+    # 3. Attempt to modify descriptive fields (e.g. siteTitle, subtitle, description) - should succeed (200)
+    response_desc = client.put(
+        f"/families/{family_id}",
+        json={"siteTitle": "新网页标题", "description": "新简介"},
+        headers=auth_headers(editor_token)
+    )
+    assert response_desc.status_code == 200
+    
+    with app_module.Session(app_module.engine) as session:
+        db_family = session.get(app_module.FamilyGroup, family_id)
+        assert db_family.site_title == "新网页标题"
+        assert db_family.description == "新简介"
+        # Confirm structural fields remained unchanged
+        assert db_family.name == "旧名称"
+        assert db_family.root_member_id == 1
+
+
