@@ -136,7 +136,7 @@ def get_family_users(family_id: int, user: main.User = Depends(main.get_current_
 def add_family_user(family_id: int, payload: Dict[str, Any], user: main.User = Depends(main.get_current_user)):
     """Assign a user to this family with a specific role."""
     with Session(main.engine) as session:
-        if not main.can_edit_family(session, user, family_id):
+        if not main.can_admin_family(session, user, family_id):
             raise HTTPException(status_code=403, detail='当前账号无权管理该家族的用户权限')
         
         family = session.get(main.FamilyGroup, family_id)
@@ -182,7 +182,7 @@ def add_family_user(family_id: int, payload: Dict[str, Any], user: main.User = D
 def remove_family_user(family_id: int, user_id: int, user: main.User = Depends(main.get_current_user)):
     """Remove a user's role from this family."""
     with Session(main.engine) as session:
-        if not main.can_edit_family(session, user, family_id):
+        if not main.can_admin_family(session, user, family_id):
             raise HTTPException(status_code=403, detail='当前账号无权管理该家族的用户权限')
         
         role = session.exec(

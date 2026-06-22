@@ -1110,6 +1110,19 @@ def can_edit_family(session: Session, user: User, family_id: int) -> bool:
     
     return False
 
+def can_admin_family(session: Session, user: User, family_id: int) -> bool:
+    """Check if user is admin (global or family-specific) for a family."""
+    # Super admin and global admin are admins for all families
+    if user.role in ('super_admin', 'admin'):
+        return True
+    
+    # Check family-specific role
+    family_role = get_user_family_role(session, user, family_id)
+    if family_role == 'admin':
+        return True
+        
+    return False
+
 def can_view_family(session: Session, user: User, family_id: int) -> bool:
     """Check if user can view a specific family."""
     if user.role in ('super_admin', 'admin'):

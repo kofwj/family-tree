@@ -21,14 +21,12 @@ def env_value(key, default=None):
         pass
     return default
 
-ADMIN_USERNAME = env_value('ADMIN_USERNAME', 'admin')
-ADMIN_PASSWORD = env_value('ADMIN_PASSWORD')
-if not ADMIN_PASSWORD:
-    raise RuntimeError('请先设置 ADMIN_PASSWORD 环境变量，或在本地 .env 中配置 ADMIN_PASSWORD')
-
-
 def login():
-    data = urllib.parse.urlencode({"username": ADMIN_USERNAME, "password": ADMIN_PASSWORD}).encode()
+    username = env_value('ADMIN_USERNAME', 'admin')
+    password = env_value('ADMIN_PASSWORD')
+    if not password:
+        raise RuntimeError('请先设置 ADMIN_PASSWORD 环境变量，或在本地 .env 中配置 ADMIN_PASSWORD')
+    data = urllib.parse.urlencode({"username": username, "password": password}).encode()
     req = urllib.request.Request(BASE + "/auth/login", data=data, method="POST")
     try:
         with urllib.request.urlopen(req) as resp:
@@ -52,31 +50,32 @@ def api(path, method="GET", data=None, token=None):
     except urllib.error.HTTPError as e:
         return {"error": e.code, "detail": e.read().decode()}
 
-login = login()
-print("LOGIN:", login)
-token = login["access_token"]
+if __name__ == '__main__':
+    login_data = login()
+    print("LOGIN:", login_data)
+    token = login_data["access_token"]
 
-# GET /members/1
-m1 = api("/members/1", token=token)
-print("GET/1:", m1.get("name"), "spouse:", m1.get("spouse"), "father:", m1.get("fatherName"))
+    # GET /members/1
+    m1 = api("/members/1", token=token)
+    print("GET/1:", m1.get("name"), "spouse:", m1.get("spouse"), "father:", m1.get("fatherName"))
 
-# CREATE
-new = api("/members", method="POST", data={
-    "name": "测试验收", "gender": "男", "generation": 3,
-    "spouse_name": "验收配偶", "father_name": "王金龙"
-}, token=token)
-print("CREATE:", new.get("name"), "id:", new.get("id"))
-new_id = new.get("id")
-
-if new_id:
-    upd = api(f"/members/{new_id}", method="PUT", data={
-        "name": "测试验收改", "gender": "男", "generation": 5,
+    # CREATE
+    new = api("/members", method="POST", data={
+        "name": "测试验收", "gender": "男", "generation": 3,
+        "spouse_name": "验收配偶", "father_name": "王金龙"
     }, token=token)
-    print("UPDATE:", upd.get("name"), "gen:", upd.get("generation"))
+    print("CREATE:", new.get("name"), "id:", new.get("id"))
+    new_id = new.get("id")
 
-    d = api(f"/members/{new_id}", method="DELETE", token=token)
-    print("DELETE:", d.get("ok"))
+    if new_id:
+        upd = api(f"/members/{new_id}", method="PUT", data={
+            "name": "测试验收改", "gender": "男", "generation": 5,
+        }, token=token)
+        print("UPDATE:", upd.get("name"), "gen:", upd.get("generation"))
 
-    # verify deleted
-    check = api(f"/members/{new_id}", token=token)
-    print("CHECK DELETED:", check.get("error"), check.get("detail", "")[:50])
+        d = api(f"/members/{new_id}", method="DELETE", token=token)
+        print("DELETE:", d.get("ok"))
+
+        # verify deleted
+        check = api(f"/members/{new_id}", token=token)
+        print("CHECK DELETED:", check.get("error"), check.get("detail", "")[:50])

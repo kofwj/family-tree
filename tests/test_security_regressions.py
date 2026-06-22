@@ -333,3 +333,97 @@ def test_fail_fast_credentials(monkeypatch):
         env=env_test
     )
     assert res_test.returncode == 0
+
+
+def test_family_editor_cannot_manage_users(client, app_module):
+    # 1. Create family, an editor user, an admin user, and a target user
+    with app_module.Session(app_module.engine) as session:
+        editor_user = app_module.User(
+            username="family_editor_test",
+            display_name="Family Editor",
+            password_hash=app_module.hash_password("EditorPass123"),
+            role="viewer",  # global role
+            is_active=True
+        )
+        admin_user = app_module.User(
+            username="family_admin_test",
+            display_name="Family Admin",
+            password_hash=app_module.hash_password("AdminPass123"),
+            role="viewer",  # global role
+            is_active=True
+        )
+        target_user = app_module.User(
+            username="target_user_test",
+            display_name="Target User",
+            password_hash=app_module.hash_password("TargetPass123"),
+            role="viewer",
+            is_active=True
+        )
+        session.add(editor_user)
+        session.add(admin_user)
+        session.add(target_user)
+        
+        family = app_module.FamilyGroup(name="测试管理家族", surname="赵", is_active=True)
+        session.add(family)
+        session.commit()
+        session.refresh(editor_user)
+        session.refresh(admin_user)
+        session.refresh(target_user)
+        session.refresh(family)
+        
+        # Authorize editor_user as family editor
+        role_editor = app_module.UserFamilyRole(
+            user_id=editor_user.id,
+            family_id=family.id,
+            role="editor"
+        )
+        # Authorize admin_user as family admin
+        role_admin = app_module.UserFamilyRole(
+            user_id=admin_user.id,
+            family_id=family.id,
+            role="admin"
+        )
+        session.add(role_editor)
+        session.add(role_admin)
+        session.commit()
+        
+        family_id = family.id
+        target_user_id = target_user.id
+        editor_id = editor_user.id
+
+    # 2. Login as the family-level editor
+    editor_token = login(client, username="family_editor_test", password="EditorPass123")
+    
+    # Attempt to assign a role to the target user (should be 403)
+    response_assign = client.post(
+        f"/families/{family_id}/users",
+        json={"userId": target_user_id, "role": "viewer"},
+        headers=auth_headers(editor_token)
+    )
+    assert response_assign.status_code == 403
+
+    # Attempt to delete the target user's role (should be 403)
+    response_delete = client.delete(
+        f"/families/{family_id}/users/{target_user_id}",
+        headers=auth_headers(editor_token)
+    )
+    assert response_delete.status_code == 403
+
+    # 3. Login as the family-level admin
+    admin_token = login(client, username="family_admin_test", password="AdminPass123")
+    
+    # Assign a role to the target user (should succeed)
+    response_assign_ok = client.post(
+        f"/families/{family_id}/users",
+        json={"userId": target_user_id, "role": "viewer"},
+        headers=auth_headers(admin_token)
+    )
+    assert response_assign_ok.status_code == 200
+
+    # Delete the target user's role (should succeed)
+    response_delete_ok = client.delete(
+        f"/families/{family_id}/users/{target_user_id}",
+        headers=auth_headers(admin_token)
+    )
+    assert response_delete_ok.status_code == 200
+
