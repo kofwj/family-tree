@@ -1,0 +1,22 @@
+{
+  "_comment": "示例模板：run_auto_organization 使用的初始家族编组数据。复制本文件为 auto_organize.json 并填入真实数据后生效（auto_organize.json 已被 .gitignore 忽略，不会提交）。也可用环境变量 AUTO_ORGANIZE_SEED_FILE 指向自定义路径。仅当数据库内成员尚未分配多家族时，且环境变量 AUTO_ORGANIZE_ON_STARTUP=true 时才会执行。",
+  "families": [
+    { "id": 1, "name": "示例一族", "surname": "甲", "site_title": "示例一族家谱", "cover_kicker": "CLAN ONE", "subtitle": "一族支系", "is_primary": true },
+    { "id": 2, "name": "示例二族", "surname": "乙", "site_title": "示例二族家谱", "cover_kicker": "CLAN TWO", "subtitle": "二族支系", "is_primary": false },
+    { "id": 3, "name": "示例三族", "surname": "丙", "site_title": "示例三族家谱", "cover_kicker": "CLAN THREE", "subtitle": "三族支系", "is_primary": false }
+  ],
+  "family_roots": {
+    "1": "始祖甲",
+    "2": "始祖乙",
+    "3": "始祖丙"
+  },
+  "member_primary_family": {
+    "始祖甲": 1, "甲二代": 1, "甲三代": 1,
+    "始祖乙": 2, "乙二代": 2,
+    "始祖丙": 3, "丙二代": 3
+  },
+  "secondary_links": [
+    ["乙二代", 1],
+    ["丙二代", 2]
+  ]
+}

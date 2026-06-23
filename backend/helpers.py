@@ -327,121 +327,114 @@ HIGH_SENSITIVITY_ARCHIVE_FIELDS = {
 
 HIGH_SENSITIVITY_FIELDS = HIGH_SENSITIVITY_STRUCTURE_FIELDS | HIGH_SENSITIVITY_ARCHIVE_FIELDS
 
+def _load_auto_organize_seed() -> Optional[Dict[str, Any]]:
+    """Load the family-organization seed data from an external JSON file.
+
+    The data (specific family names / real person names) lives outside the
+    source code. Path can be overridden via AUTO_ORGANIZE_SEED_FILE; defaults to
+    backend/data_seed/auto_organize.json. Returns None if the file is absent.
+    """
+    seed_path = os.getenv('AUTO_ORGANIZE_SEED_FILE')
+    if seed_path:
+        path = Path(seed_path)
+    else:
+        path = Path(os.path.dirname(__file__)) / 'data_seed' / 'auto_organize.json'
+    if not path.exists():
+        print(f"[Startup] Auto-organize seed file not found at {path}; skipping organization.")
+        return None
+    try:
+        with path.open(encoding='utf-8') as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError) as exc:
+        print(f"[Startup] Failed to read auto-organize seed file {path}: {exc}; skipping.")
+        return None
+
+
 def run_auto_organization(session: Session):
     # Check if database has members and they are all still in a single family (or unassigned)
     members = session.exec(select(Member)).all()
     distinct_families = {m.primary_family_id for m in members if m.primary_family_id is not None}
-    if len(members) > 0 and len(distinct_families) <= 1:
-        # 1. Rename family 1 to 王氏家族
-        unorganized_family = session.exec(select(FamilyGroup).where(FamilyGroup.id == 1)).first()
-        if unorganized_family:
-            unorganized_family.name = '王氏家族'
-            unorganized_family.surname = '王'
-            unorganized_family.site_title = '王氏家族家谱'
-            unorganized_family.cover_kicker = 'WANG CLAN'
-            unorganized_family.subtitle = '王氏支系'
-            unorganized_family.is_primary = True
-            session.add(unorganized_family)
-        
-        # 2. Create the other 8 family groups if they don't exist
-        families = [
-            (2, "孙氏家族", "孙", "孙氏家族家谱", "SUN CLAN", "孙氏支系"),
-            (3, "顾氏家族", "顾", "顾氏家族家谱", "GU CLAN", "顾氏支系"),
-            (4, "曹氏家族", "曹", "曹氏家族家谱", "CAO CLAN", "曹氏支系"),
-            (5, "周氏家族", "周", "周氏家族家谱", "ZHOU CLAN", "周氏支系"),
-            (6, "季氏家族", "季", "季氏家族家谱", "JI CLAN", "季氏支系"),
-            (7, "成氏家族", "成", "成氏家族家谱", "CHENG CLAN", "成氏支系"),
-            (8, "洪氏家族", "洪", "洪氏家族家谱", "HONG CLAN", "洪氏支系"),
-            (9, "张氏家族", "张", "张氏家族家谱", "ZHANG CLAN", "张氏支系")
-        ]
-        for fid, name, surname, title, kicker, subtitle in families:
-            existing = session.get(FamilyGroup, fid)
-            if not existing:
-                fg = FamilyGroup(
-                    id=fid,
-                    name=name,
-                    surname=surname,
-                    site_title=title,
-                    cover_kicker=kicker,
-                    subtitle=subtitle,
-                    is_primary=False,
-                    is_active=True,
-                    sort_order=0,
-                    primary_line='paternal'
-                )
-                session.add(fg)
-        session.commit()
-        
-        # Reload members and build name-to-member mapping
-        members = session.exec(select(Member)).all()
-        name_to_member = {m.name: m for m in members if m.name}
-        
-        # Update root member IDs dynamically by name
-        family_roots = {
-            1: "王金龙",
-            2: "孙怀志",
-            3: "顾伦如",
-            4: "曹福彬",
-            5: "周宇飞",
-            6: "季小磊",
-            7: "成德泉",
-            8: "洪建国",
-            9: "张佳杰"
-        }
-        for fid, root_name in family_roots.items():
-            fg = session.get(FamilyGroup, fid)
-            rm = name_to_member.get(root_name)
-            if fg and rm:
-                fg.root_member_id = rm.id
-                session.add(fg)
-                
-        # 3. Define name-based primary family mapping
-        member_name_primary_family = {
-            # 王氏家族 (1)
-            "王金龙": 1, "王文华": 1, "王万云": 1, "王文莲": 1, "王文忠": 1, "王健": 1, "王忆涵": 1, "王小琴": 1, "吕永芳": 1, "阿姨": 1, "徐压美": 1, "王俊": 1, "王嘉诚": 1,
-            # 孙氏家族 (2)
-            "孙怀志": 2, "张圣莲": 2, "孙永祥": 2, "孙永军": 2, "孙永珍": 2, "孙永芳": 2, "孙小雪": 2, "王建兰": 2, "孙金苏": 2, "邱静雯": 2, "孙建": 2,
-            # 顾氏家族 (3)
-            "顾伦如": 3, "陈秀英": 3, "顾福梅": 3, "顾亚红": 3, "顾天文": 3,
-            # 曹氏家族 (4)
-            "曹福彬": 4, "曹晓慧": 4,
-            # 周氏家族 (5)
-            "周宇飞": 5, "周欣榕": 5,
-            # 季氏家族 (6)
-            "季小磊": 6, "季梓琪": 6,
-            # 成氏家族 (7)
-            "成德泉": 7, "成小青": 7, "成博瑞": 7,
-            # 洪氏家族 (8)
-            "洪建国": 8, "洪燕": 8,
-            # 张氏家族 (9)
-            "张佳杰": 9
-        }
-        
-        # 4. Clear existing links
-        existing_links = session.exec(select(MemberFamilyLink)).all()
-        for link in existing_links:
-            session.delete(link)
-            
-        # 5. Set primary_family_id and insert primary family links
-        for name, fid in member_name_primary_family.items():
-            m = name_to_member.get(name)
-            if m:
-                m.primary_family_id = fid
-                session.add(m)
-                link = MemberFamilyLink(member_id=m.id, family_id=fid, relation_type='primary', is_primary=True)
-                session.add(link)
-                
-        # 6. Insert secondary links (spouses marrying into other families)
-        secondary_links = [
-            ("孙永芳", 1), ("顾福梅", 1), ("曹福彬", 1), ("周宇飞", 1), ("季小磊", 4), ("成德泉", 2), ("顾亚红", 2), ("洪建国", 1), ("张佳杰", 8), ("王俊", 7), ("孙建", 3)
-        ]
-        for name, fid in secondary_links:
-            m = name_to_member.get(name)
-            if m:
-                link = MemberFamilyLink(member_id=m.id, family_id=fid, relation_type='secondary', is_primary=False)
-                session.add(link)
-                
-        session.commit()
+    if not (len(members) > 0 and len(distinct_families) <= 1):
+        return
+
+    seed = _load_auto_organize_seed()
+    if not seed:
+        return
+
+    families = seed.get('families', [])
+    family_roots = {int(k): v for k, v in (seed.get('family_roots', {}) or {}).items()}
+    member_name_primary_family = seed.get('member_primary_family', {}) or {}
+    secondary_links = seed.get('secondary_links', []) or []
+
+    # 1 & 2. Create/update family groups from seed
+    for fam in families:
+        fid = fam.get('id')
+        if fid is None:
+            continue
+        existing = session.get(FamilyGroup, fid)
+        if existing:
+            # Only the primary (id-based) family is renamed in-place (was family 1).
+            if fam.get('is_primary'):
+                existing.name = fam.get('name', existing.name)
+                existing.surname = fam.get('surname', existing.surname)
+                existing.site_title = fam.get('site_title', existing.site_title)
+                existing.cover_kicker = fam.get('cover_kicker', existing.cover_kicker)
+                existing.subtitle = fam.get('subtitle', existing.subtitle)
+                existing.is_primary = True
+                session.add(existing)
+        else:
+            fg = FamilyGroup(
+                id=fid,
+                name=fam.get('name', ''),
+                surname=fam.get('surname'),
+                site_title=fam.get('site_title'),
+                cover_kicker=fam.get('cover_kicker'),
+                subtitle=fam.get('subtitle'),
+                is_primary=bool(fam.get('is_primary', False)),
+                is_active=True,
+                sort_order=0,
+                primary_line='paternal'
+            )
+            session.add(fg)
+    session.commit()
+
+    # Reload members and build name-to-member mapping
+    members = session.exec(select(Member)).all()
+    name_to_member = {m.name: m for m in members if m.name}
+
+    # Update root member IDs dynamically by name
+    for fid, root_name in family_roots.items():
+        fg = session.get(FamilyGroup, fid)
+        rm = name_to_member.get(root_name)
+        if fg and rm:
+            fg.root_member_id = rm.id
+            session.add(fg)
+
+    # 4. Clear existing links
+    existing_links = session.exec(select(MemberFamilyLink)).all()
+    for link in existing_links:
+        session.delete(link)
+
+    # 5. Set primary_family_id and insert primary family links
+    for name, fid in member_name_primary_family.items():
+        m = name_to_member.get(name)
+        if m:
+            m.primary_family_id = fid
+            session.add(m)
+            link = MemberFamilyLink(member_id=m.id, family_id=fid, relation_type='primary', is_primary=True)
+            session.add(link)
+
+    # 6. Insert secondary links (spouses marrying into other families)
+    for entry in secondary_links:
+        if not isinstance(entry, (list, tuple)) or len(entry) != 2:
+            continue
+        name, fid = entry
+        m = name_to_member.get(name)
+        if m:
+            link = MemberFamilyLink(member_id=m.id, family_id=fid, relation_type='secondary', is_primary=False)
+            session.add(link)
+
+    session.commit()
 
 def heal_unlinked_relations(session: Session):
     members = session.exec(select(Member)).all()
@@ -662,6 +655,33 @@ def login_rate_limit_key(request: Request, username: str) -> str:
     return f'{ip}:{(username or "").strip().lower()}'
 
 
+# NOTE: LOGIN_ATTEMPTS is an in-process dict. It is correct for the current
+# single-worker uvicorn deployment (see backend/Dockerfile). If you ever run
+# multiple workers (uvicorn --workers N / gunicorn), each worker keeps its own
+# copy and the effective limit becomes N times higher — switch to a shared
+# store (Redis / database) before scaling out.
+# Hard cap on tracked keys so a flood of random usernames can't grow memory
+# without bound; when exceeded we drop the oldest (earliest first_attempt) entries.
+LOGIN_ATTEMPTS_MAX_KEYS = 10000
+
+
+def _prune_login_attempts(now: float):
+    """Remove expired entries, and if still over the cap, drop the oldest ones."""
+    attempts = main.LOGIN_ATTEMPTS
+    expired = [
+        k for k, row in attempts.items()
+        if now - row.get('first_attempt_at', now) > LOGIN_RATE_LIMIT_WINDOW_SECONDS
+        and not (row.get('locked_until', 0) and now < row['locked_until'])
+    ]
+    for k in expired:
+        attempts.pop(k, None)
+    if len(attempts) > LOGIN_ATTEMPTS_MAX_KEYS:
+        # Drop oldest entries (by first_attempt_at) down to the cap.
+        ordered = sorted(attempts.items(), key=lambda kv: kv[1].get('first_attempt_at', 0))
+        for k, _ in ordered[:len(attempts) - LOGIN_ATTEMPTS_MAX_KEYS]:
+            attempts.pop(k, None)
+
+
 def check_login_rate_limit(request: Request, username: str):
     now = time.monotonic()
     key = login_rate_limit_key(request, username)
@@ -687,6 +707,8 @@ def record_login_failure(request: Request, username: str):
     if row['count'] >= LOGIN_RATE_LIMIT_MAX:
         row['locked_until'] = now + LOGIN_RATE_LIMIT_LOCK_SECONDS
     main.LOGIN_ATTEMPTS[key] = row
+    # Opportunistically reclaim memory from expired/overflowing entries.
+    _prune_login_attempts(now)
 
 
 def clear_login_failures(request: Request, username: str):

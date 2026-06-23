@@ -191,7 +191,15 @@
  * - flow: ECharts Sunburst panorama for complex relation inspection
  */
 import { computed, nextTick, ref, watch, onMounted, onBeforeUnmount } from 'vue'
-import * as echarts from 'echarts'
+// On-demand echarts imports (tree-shaken) instead of the full bundle.
+// We only use a graph series with tooltip; decal patterns (deceased overlay)
+// are provided by the AriaComponent.
+import * as echarts from 'echarts/core'
+import { GraphChart } from 'echarts/charts'
+import { TooltipComponent, AriaComponent } from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
+
+echarts.use([GraphChart, TooltipComponent, AriaComponent, CanvasRenderer])
 import { FAMILY_HUE_PRESETS, getFamilySurname, getBaseHueForSurname, generateFamilyPalette } from '../utils/genealogy'
 import { fetchAuthenticatedObjectUrl, revokeObjectUrl } from '../utils/authenticatedAsset'
 
@@ -241,9 +249,25 @@ function clearMemberPhotos() {
   authenticatedPhotos.value.clear()
 }
 
-watch(() => props.members, () => {
+// Lightweight signature of the fields that actually affect the panorama render.
+// Avoids deep-watching the whole members array (which recursively diffs every
+// field of every member on each change).
+const membersSignature = computed(() => {
+  const list = props.members || []
+  let sig = String(list.length)
+  for (const m of list) {
+    sig += `|${m.id}:${m.name ?? ''}:${m.fatherId ?? ''}:${m.motherId ?? ''}:`
+      + `${Array.isArray(m.spouseIds) ? m.spouseIds.join(',') : (m.spouseIds ?? '')}:`
+      + `${m.generation ?? ''}:${m.rankNo ?? ''}:${m.branch ?? ''}:`
+      + `${m.birthDate ?? ''}:${m.birthDateText ?? ''}:${m.deathDate ?? ''}:${m.deathDateText ?? ''}:`
+      + `${m.isLiving ?? ''}:${m.photoUrl ?? m.photo_path ?? ''}:${m.privacyLevel ?? ''}`
+  }
+  return sig
+})
+
+watch(membersSignature, () => {
   loadMemberPhotos()
-}, { immediate: true, deep: true })
+}, { immediate: true })
 
 const branchPalette = computed(() => {
   const surname = getFamilySurname(props.familyName)
@@ -392,15 +416,24 @@ function buildRelationGraph(members) {
     }
   }
 
-  // Add sibling edges (sharing same father or mother)
-  for (let i = 0; i < members.length; i++) {
-    for (let j = i + 1; j < members.length; j++) {
-      const m1 = members[i]
-      const m2 = members[j]
-      const isSibling = (m1.fatherId && m1.fatherId === m2.fatherId) || 
-                        (m1.motherId && m1.motherId === m2.motherId)
-      if (isSibling) {
-        addEdge(Number(m1.id), Number(m2.id))
+  // Add sibling edges (sharing same father or mother).
+  // Bucket members by parent id so this is O(n) instead of O(n^2).
+  const childrenByParent = new Map() // parentId -> Set of memberIds
+  for (const m of members) {
+    const mid = Number(m.id)
+    for (const parentId of [m.fatherId, m.motherId]) {
+      if (parentId === null || parentId === undefined || parentId === '') continue
+      const pid = Number(parentId)
+      if (!childrenByParent.has(pid)) childrenByParent.set(pid, new Set())
+      childrenByParent.get(pid).add(mid)
+    }
+  }
+  for (const siblingSet of childrenByParent.values()) {
+    if (siblingSet.size < 2) continue
+    const siblingIds = Array.from(siblingSet)
+    for (let i = 0; i < siblingIds.length; i++) {
+      for (let j = i + 1; j < siblingIds.length; j++) {
+        addEdge(siblingIds[i], siblingIds[j])
       }
     }
   }
@@ -437,7 +470,6 @@ function computeLayout(members, centerId) {
   }
 
   // BFS to assign distances and build spanning tree
-  // BFS to assign distances and build spanning tree
   const distance = new Map() // memberId -> distance (0, 1, 2...)
   const bfsParent = new Map() // memberId -> parentId in tree
   const bfsChildren = new Map() // memberId -> list of childIds in tree
@@ -452,11 +484,22 @@ function computeLayout(members, centerId) {
   relationToCenter.set(Number(centerId), '自己 (焦点)')
   const visited = new Set([centerId])
 
+  // Generation limit: '3' / '5' cap the BFS radius (relation hops) around the
+  // center; 'all' means no cap. Without this the selector had no visible effect.
+  const limitRaw = generationLimit.value
+  const maxHops = (limitRaw === 'all' || limitRaw === null || limitRaw === undefined)
+    ? Infinity
+    : Number(limitRaw)
+  const hopCap = Number.isFinite(maxHops) ? Math.max(0, maxHops) : Infinity
+
   while (queue.length > 0) {
     const curr = queue.shift()
     const dist = distance.get(curr)
     const parentRelation = relationToCenter.get(Number(curr)) || ''
-    
+
+    // Stop expanding once we've reached the configured relation radius.
+    if (dist >= hopCap) continue
+
     const neighbors = Array.from(graph.get(curr) || [])
     
     if (dist === 0) {
@@ -562,7 +605,9 @@ function computeLayout(members, centerId) {
     const isChild = Number(m.fatherId) === Number(rootMember.id) || Number(m.motherId) === Number(rootMember.id)
     if (isChild) return [4 * Math.PI / 3, 11 * Math.PI / 6] // 240 to 330 deg (bottom)
     
-    return [Math.PI / 4, Math.PI / 3]
+    // Others go into the free upper-left gap (120-180 deg) so they don't
+    // collide with the spouse (right) or parent (top) sectors.
+    return [2 * Math.PI / 3, Math.PI]
   }
 
   function assignAngles(nodeId, thetaMin, thetaMax, r) {
@@ -696,7 +741,7 @@ function computeLayout(members, centerId) {
   partitionSector(spousesList, -Math.PI / 6, Math.PI / 4, RingWidth)
   partitionSector(siblingsList, Math.PI, 5 * Math.PI / 4, RingWidth)
   partitionSector(childrenList, 4 * Math.PI / 3, 11 * Math.PI / 6, RingWidth)
-  partitionSector(othersList, Math.PI / 4, Math.PI / 3, RingWidth)
+  partitionSector(othersList, 2 * Math.PI / 3, Math.PI, RingWidth)
 
   // Formulate ECharts nodes and links
   const echartsNodes = []
@@ -966,7 +1011,7 @@ function computeLayout(members, centerId) {
                 itemStyle: { color: '#4d7cff' },
                 label: {
                   show: true,
-                  formatter: `→ To ${child.name}`,
+                  formatter: `→ 跳转至 ${child.name}`,
                   position: 'right',
                   color: '#4d7cff',
                   fontSize: 10,
@@ -1096,7 +1141,7 @@ function computeLayout(members, centerId) {
             itemStyle: { color: '#4d7cff' },
             label: {
               show: true,
-              formatter: `→ To ${child.name}`,
+              formatter: `→ 跳转至 ${child.name}`,
               position: 'right',
               color: '#4d7cff',
               fontSize: 10,
@@ -1192,6 +1237,12 @@ function computeLayout(members, centerId) {
   const keyword = normalizeText(searchKeyword.value).toLowerCase()
   const isSearchActive = !!keyword
   if (isSearchActive) {
+    // Pre-index nodes by id so highlight lookups are O(1) instead of O(n) per node/link.
+    const nodeIndex = new Map()
+    for (const node of echartsNodes) {
+      nodeIndex.set(node.id, node)
+    }
+
     for (const node of echartsNodes) {
       if (node.symbolSize === 0 || node.id.startsWith('ring-') || node.id.startsWith('border-') || node.id.startsWith('deceased-')) continue
       const m = node.rawMember
@@ -1217,7 +1268,7 @@ function computeLayout(members, centerId) {
         node.label.fontWeight = 'bold'
 
         // Highlight matching border node if it exists
-        const borderNode = echartsNodes.find(n => n.id === `border-${node.id}`)
+        const borderNode = nodeIndex.get(`border-${node.id}`)
         if (borderNode) {
           borderNode.itemStyle.opacity = 1.0
           borderNode.itemStyle.borderColor = '#d3a26a'
@@ -1230,16 +1281,16 @@ function computeLayout(members, centerId) {
         node.label.opacity = 0.15
 
         // Dim associated border/deceased nodes
-        const borderNode = echartsNodes.find(n => n.id === `border-${node.id}`)
+        const borderNode = nodeIndex.get(`border-${node.id}`)
         if (borderNode) borderNode.itemStyle.opacity = 0.15
-        const deceasedNode = echartsNodes.find(n => n.id === `deceased-${node.id}`)
+        const deceasedNode = nodeIndex.get(`deceased-${node.id}`)
         if (deceasedNode) deceasedNode.itemStyle.opacity = 0.15
       }
     }
 
     for (const link of echartsLinks) {
-      const sourceNode = echartsNodes.find(n => n.id === link.source)
-      const targetNode = echartsNodes.find(n => n.id === link.target)
+      const sourceNode = nodeIndex.get(link.source)
+      const targetNode = nodeIndex.get(link.target)
       const sourceDimmed = sourceNode && sourceNode.itemStyle && sourceNode.itemStyle.opacity === 0.15
       const targetDimmed = targetNode && targetNode.itemStyle && targetNode.itemStyle.opacity === 0.15
       if (sourceDimmed || targetDimmed) {
@@ -1294,6 +1345,10 @@ function renderChart() {
       formatter: (params) => {
         const data = params.data?.rawMember
         if (!data) return ''
+        // Escape user-entered text before injecting into tooltip HTML (XSS guard).
+        const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => (
+          { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+        ))
         const genderColor = data.gender === '女' ? '#ff85a2' : '#85a2ff'
         const spouse = (data.spouses || []).map(s => s.name).filter(Boolean).join('、') || data.spouse || '无'
         const lifespan = `${data.birthDate || data.birthDateText || '生年不详'}${data.deathDate || data.deathDateText ? ' ~ ' + (data.deathDate || data.deathDateText) : ''}`
@@ -1303,20 +1358,20 @@ function renderChart() {
         return `
           <div style="padding: 6px; font-family: system-ui, sans-serif; line-height: 1.6;">
             <div style="font-size: 15px; font-weight: bold; margin-bottom: 4px; border-bottom: 1px solid rgba(211,162,106,0.3); padding-bottom: 4px; display: flex; align-items: center; justify-content: space-between; gap: 20px;">
-              <span>${data.name}</span>
+              <span>${esc(data.name)}</span>
               <span style="font-size: 11px; color: ${genderColor}; background: ${genderColor}18; padding: 1px 4px; border-radius: 3px; border: 1px solid ${genderColor}33;">
-                ${data.gender || '未知'}
+                ${esc(data.gender || '未知')}
               </span>
             </div>
             <div style="font-size: 12px;">
-              <div><strong>关系：</strong>${relation}</div>
-              <div><strong>世代：</strong>第 ${data.generation} 代 ${data.generationName ? `(${data.generationName}辈)` : ''}</div>
-              <div><strong>排行：</strong>${data.rankTitle || '无'}</div>
-              <div><strong>支系：</strong>${data.branch || '主脉'}</div>
-              <div><strong>生卒：</strong>${lifespan}</div>
-              <div><strong>配偶：</strong>${spouse}</div>
-              <div><strong>职业：</strong>${occupation}</div>
-              <div><strong>所在地：</strong>${location}</div>
+              <div><strong>关系：</strong>${esc(relation)}</div>
+              <div><strong>世代：</strong>第 ${esc(data.generation)} 代 ${data.generationName ? `(${esc(data.generationName)}辈)` : ''}</div>
+              <div><strong>排行：</strong>${esc(data.rankTitle || '无')}</div>
+              <div><strong>支系：</strong>${esc(data.branch || '主脉')}</div>
+              <div><strong>生卒：</strong>${esc(lifespan)}</div>
+              <div><strong>配偶：</strong>${esc(spouse)}</div>
+              <div><strong>职业：</strong>${esc(occupation)}</div>
+              <div><strong>所在地：</strong>${esc(location)}</div>
               <div style="margin-top: 4px; font-size: 10px; color: rgba(255,255,255,0.5); border-top: 1px dashed rgba(255,255,255,0.15); padding-top: 4px;">
                 点击可将该成员设为关系圈中心
               </div>
@@ -1437,11 +1492,11 @@ watch(displayMode, (newMode) => {
   }
 })
 
-watch([() => props.tree, () => props.members], () => {
+watch([() => props.tree, membersSignature], () => {
   if (displayMode.value === 'flow') {
     renderChart()
   }
-}, { deep: true })
+})
 
 watch([searchKeyword, generationLimit], () => {
   if (displayMode.value === 'flow') {

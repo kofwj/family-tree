@@ -47,5 +47,10 @@ data/members-import-template.xlsx
 scratch_members.json
 check_layout.py
 
+# Auto-organize seed contains real family/person names (private).
+# Keep only the de-identified example in version control.
+backend/data_seed/auto_organize.json
+!backend/data_seed/auto_organize.example.json
+
 # Logs
 *.log
