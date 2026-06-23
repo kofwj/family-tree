@@ -57,8 +57,12 @@ def create_member(payload: MemberCreate, user: main.User = Depends(main.require_
         scope_ids = main.build_member_full_scope(session, user)
         if scope_ids is not None:
             allowed_parent_ids = {pid for pid in [data.get('father_id'), data.get('mother_id')] if pid}
+            allowed_spouse_ids = set(data.get('spouse_ids') or [])
             if allowed_parent_ids:
                 if not allowed_parent_ids.intersection(scope_ids):
+                    raise HTTPException(status_code=403, detail='当前账号仅可在自己归属分支下新增成员')
+            elif allowed_spouse_ids:
+                if not allowed_spouse_ids.intersection(scope_ids):
                     raise HTTPException(status_code=403, detail='当前账号仅可在自己归属分支下新增成员')
             else:
                 raise HTTPException(status_code=403, detail='当前账号新增成员时必须挂接到自己归属分支内的父亲或母亲')
@@ -90,6 +94,31 @@ def create_member(payload: MemberCreate, user: main.User = Depends(main.require_
                 primary_family = session.exec(select(main.FamilyGroup).where(main.FamilyGroup.is_primary == True)).first()
                 if primary_family:
                     data['primary_family_id'] = primary_family.id
+        
+        # 自动推导世代信息
+        if 'generation' not in data or data['generation'] is None:
+            father_id = data.get('father_id')
+            mother_id = data.get('mother_id')
+            spouse_ids = main.parse_spouse_ids_value(data.get('spouse_ids'))
+            
+            inherited_gen = None
+            if father_id:
+                father = session.get(main.Member, father_id)
+                if father and father.generation is not None:
+                    inherited_gen = father.generation + 1
+            if not inherited_gen and mother_id:
+                mother = session.get(main.Member, mother_id)
+                if mother and mother.generation is not None:
+                    inherited_gen = mother.generation + 1
+            if not inherited_gen and spouse_ids:
+                first_spouse = session.get(main.Member, spouse_ids[0])
+                if first_spouse and first_spouse.generation is not None:
+                    inherited_gen = first_spouse.generation
+            
+            if inherited_gen is not None:
+                data['generation'] = inherited_gen
+            else:
+                data['generation'] = 1
         
         family_id = data.get('primary_family_id')
         if family_id and not main.can_edit_family(session, user, family_id):

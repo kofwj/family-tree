@@ -1778,7 +1778,8 @@ def import_excel(path: str, replace=True) -> int:
                 if nm:
                     by_name.setdefault(nm, []).append(m)
 
-            for m in members:
+            # 仅对本次导入新增的成员进行关系推导和写入，防止覆盖历史手动修正数据
+            for m, _ in member_family_mapping:
                 family_id = m.primary_family_id
                 
                 # 同家族过滤以及世代差启发式匹配父亲
@@ -1827,7 +1828,8 @@ def import_excel(path: str, replace=True) -> int:
                         link = MemberFamilyLink(member_id=member.id, family_id=family_id)
                         session.add(link)
             
-            for m in members:
+            # 仅对本次新导入成员同步配偶关联
+            for m, _ in member_family_mapping:
                 sync_member_spouse_links(session, m.id, [], parse_spouse_ids_value(m.spouse_ids))
             session.commit()
             return count
@@ -2131,6 +2133,18 @@ def save_settings_dict(session: Session, payload: AppSettings) -> Dict[str, Any]
         else:
             row = SiteSetting(key=key, value=stored_value, updated_at=now)
         session.add(row)
+        
+    # 同步更新主家族的基本属性
+    primary_family = session.exec(select(FamilyGroup).where(FamilyGroup.is_primary == True)).first()
+    if primary_family:
+        primary_family.surname = data.get('familySurname') or primary_family.surname
+        primary_family.name = (data.get('familySurname') or '') + '氏宗族'
+        primary_family.site_title = data.get('siteTitle') or primary_family.site_title
+        primary_family.subtitle = data.get('subtitle') or primary_family.subtitle
+        primary_family.cover_kicker = data.get('coverKicker') or primary_family.cover_kicker
+        primary_family.description = data.get('treeDescription') or primary_family.description
+        session.add(primary_family)
+
     session.commit()
     return get_settings_dict(session)
 
@@ -2250,6 +2264,8 @@ def build_data_quality_report(session: Session) -> Dict[str, Any]:
     for m in members:
         if m.id is None:
             continue
+        if m.generation is None:
+            add('error', 'missing_generation', m, '成员缺少世代信息，可能导致家谱树排序及展示位置混乱')
         for field, pid in [('father_id', m.father_id), ('mother_id', m.mother_id)]:
             if pid and pid not in by_id:
                 add('error', 'invalid_relation', m, f'{field} 指向不存在成员 #{pid}', {'field': field, 'targetId': pid})
