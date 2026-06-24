@@ -160,15 +160,23 @@
           <div class="legend-group-title">人物年代/状态</div>
           <div class="legend-item">
             <span class="legend-dot dot-millennial"></span>
-            <span>2000年后出生 (粉红)</span>
+            <span>2000年后出生 (亮粉)</span>
           </div>
           <div class="legend-item">
-            <span class="legend-dot dot-modern"></span>
-            <span>1970-1999出生 (橙黄)</span>
+            <span class="legend-dot dot-genx"></span>
+            <span>1980-1999出生 (亮橙)</span>
+          </div>
+          <div class="legend-item">
+            <span class="legend-dot dot-boomer"></span>
+            <span>1960-1979出生 (亮黄)</span>
           </div>
           <div class="legend-item">
             <span class="legend-dot dot-classic"></span>
-            <span>1970前/生年不详 (蔚蓝)</span>
+            <span>1940-1959出生 (绿色)</span>
+          </div>
+          <div class="legend-item">
+            <span class="legend-dot dot-old"></span>
+            <span>1940前出生 (蓝色)</span>
           </div>
           <div class="legend-item">
             <span class="legend-dot dot-deceased"></span>
@@ -176,7 +184,7 @@
           </div>
           <div class="legend-item">
             <span class="legend-dot dot-active"></span>
-            <span>当前选中/查看中</span>
+            <span>当前焦点人物 (橙色边框)</span>
           </div>
         </div>
       </div>
@@ -707,17 +715,18 @@ function computeLayout(members, centerId) {
     for (let i = 0; i < childrenMembers.length; i++) {
       const child = childrenMembers[i]
 
-      // Check if this child is a spouse (should stay in same ring with small offset)
+      // Check if this child is a spouse (should stay in same ring at same radius)
       const parentMember = memberById.get(Number(nodeId))
       const isSpouse = parentMember && Array.isArray(parentMember.spouseIds) &&
                        parentMember.spouseIds.map(Number).includes(Number(child.id))
 
-      // Spouses use small offset, others use full ring width
-      const childRadius = isSpouse ? (r + 20) : (r + RingWidth)
+      // Spouses use SAME radius (truly same ring), separated only by angle
+      // Others use full ring width (next ring)
+      const childRadius = isSpouse ? r : (r + RingWidth)
 
       // Check for twins/multiples: same birth date AND same parents
       let isTwin = false
-      if (i < childrenMembers.length - 1) {
+      if (!isSpouse && i < childrenMembers.length - 1) {
         const nextChild = childrenMembers[i + 1]
         const date1 = child.birthDate || child.birthDateText
         const date2 = nextChild.birthDate || nextChild.birthDateText
@@ -903,15 +912,31 @@ function computeLayout(members, centerId) {
     const isActive = mid === Number(currentCenterMemberId.value)
     
     const birthYear = getBirthYear(m)
-    let color = '#5cb8ff'
+    let color = '#5cb8ff' // Default blue for unknown birth year
+
+    // More vibrant color coding inspired by the example diagram
     if (birthYear) {
-      if (birthYear >= 2000) color = '#ff85a2'
-      else if (birthYear >= 1970) color = '#ffbe5c'
+      if (birthYear >= 2000) {
+        color = '#ff5a8a' // Bright pink for millennials/Gen Z
+      } else if (birthYear >= 1980) {
+        color = '#ffa726' // Bright orange for Gen X/Y
+      } else if (birthYear >= 1960) {
+        color = '#ffeb3b' // Bright yellow for boomers
+      } else if (birthYear >= 1940) {
+        color = '#66bb6a' // Green for earlier generations
+      } else {
+        color = '#42a5f5' // Blue for oldest generations
+      }
     } else {
-      color = '#e0e0e0'
+      color = '#90a4ae' // Grey for unknown birth year
     }
-    
+
     const isDeceased = !m.isLiving || m.deathDate || m.deathDateText
+
+    // Deceased members use grey tone
+    if (isDeceased) {
+      color = '#757575' // Dark grey for deceased
+    }
     
     const thetaRad = thetaDegrees * Math.PI / 180
     const x = r * Math.cos(thetaRad)
@@ -964,8 +989,14 @@ function computeLayout(members, centerId) {
     const ringLevel = Math.floor(r / RingWidth)
     let borderSize, nodeSize, fontSize
     if (mid === centerId) {
-      borderSize = 48
-      nodeSize = 42
+      // Center person: larger size
+      borderSize = 56
+      nodeSize = 48
+      fontSize = 12
+    } else if (isActive) {
+      // Active/focused person: prominent size even if not center
+      borderSize = 50
+      nodeSize = 44
       fontSize = 11
     } else if (ringLevel === 1) {
       borderSize = 36
@@ -988,10 +1019,11 @@ function computeLayout(members, centerId) {
         symbolSize: borderSize,
         itemStyle: {
           color: 'none',
-          borderColor: isActive ? '#c48b58' : (isDeceased ? '#666666' : color),
-          borderWidth: isActive ? 3 : (isDeceased ? 2 : 1.5),
-          shadowColor: isActive ? '#c48b58' : 'rgba(0,0,0,0.15)',
-          shadowBlur: isActive ? 10 : 6
+          // Active person: bright orange border; Deceased: grey; Normal: age color
+          borderColor: isActive ? '#ff6f00' : (isDeceased ? '#666666' : color),
+          borderWidth: isActive ? 4 : (isDeceased ? 2 : 2),
+          shadowColor: isActive ? '#ff6f00' : 'rgba(0,0,0,0.15)',
+          shadowBlur: isActive ? 15 : 6
         },
         silent: true
       })
@@ -1051,10 +1083,11 @@ function computeLayout(members, centerId) {
         symbolSize: nodeSize,
         itemStyle: {
           color: isDeceased ? '#a0a0a0' : color,
-          borderColor: isActive ? '#c48b58' : (isDeceased ? '#666666' : '#ffffff'),
-          borderWidth: isActive ? 3 : (isDeceased ? 2 : 1.5),
-          shadowColor: isActive ? '#c48b58' : 'rgba(0,0,0,0.15)',
-          shadowBlur: isActive ? 10 : 6,
+          // Active person: bright orange border
+          borderColor: isActive ? '#ff6f00' : (isDeceased ? '#666666' : '#ffffff'),
+          borderWidth: isActive ? 4 : (isDeceased ? 2 : 2),
+          shadowColor: isActive ? '#ff6f00' : 'rgba(0,0,0,0.15)',
+          shadowBlur: isActive ? 15 : 6,
           decal: isDeceased ? {
             symbol: 'line',
             dashArrayX: [1, 0],
@@ -3022,27 +3055,35 @@ watch(readerItems, (items) => {
 }
 
 .dot-millennial {
-  background: #ff85a2;
+  background: #ff5a8a; /* Bright pink - 2000+ */
 }
 
-.dot-modern {
-  background: #ffbe5c;
+.dot-genx {
+  background: #ffa726; /* Bright orange - 1980-1999 */
+}
+
+.dot-boomer {
+  background: #ffeb3b; /* Bright yellow - 1960-1979 */
 }
 
 .dot-classic {
-  background: #5cb8ff;
+  background: #66bb6a; /* Green - 1940-1959 */
+}
+
+.dot-old {
+  background: #42a5f5; /* Blue - before 1940 */
 }
 
 .dot-deceased {
-  background: #a0a0a0;
+  background: #757575; /* Dark grey */
   border-color: #666666;
   background-image: linear-gradient(45deg, rgba(0,0,0,0.15) 25%, transparent 25%, transparent 50%, rgba(0,0,0,0.15) 50%, rgba(0,0,0,0.15) 75%, transparent 75%, transparent);
   background-size: 4px 4px;
 }
 
 .dot-active {
-  background: #5cb8ff;
-  border: 2px solid #c48b58;
-  box-shadow: 0 0 4px #c48b58;
+  background: #fff;
+  border: 2px solid #ff6f00; /* Bright orange border */
+  box-shadow: 0 0 6px #ff6f00;
 }
 </style>
