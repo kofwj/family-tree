@@ -480,6 +480,26 @@ function buildRelationGraph(members) {
   return { graph, memberById }
 }
 
+// Color interpolation helper function
+function interpolateColor(color1, color2, ratio) {
+  // Parse hex colors
+  const r1 = parseInt(color1.slice(1, 3), 16)
+  const g1 = parseInt(color1.slice(3, 5), 16)
+  const b1 = parseInt(color1.slice(5, 7), 16)
+
+  const r2 = parseInt(color2.slice(1, 3), 16)
+  const g2 = parseInt(color2.slice(3, 5), 16)
+  const b2 = parseInt(color2.slice(5, 7), 16)
+
+  // Interpolate
+  const r = Math.round(r1 + (r2 - r1) * ratio)
+  const g = Math.round(g1 + (g2 - g1) * ratio)
+  const b = Math.round(b1 + (b2 - b1) * ratio)
+
+  // Convert back to hex
+  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`
+}
+
 function findDefaultCenterMember() {
   if (!props.members || props.members.length === 0) return null
   let lowestGen = Infinity
@@ -715,14 +735,14 @@ function computeLayout(members, centerId) {
     for (let i = 0; i < childrenMembers.length; i++) {
       const child = childrenMembers[i]
 
-      // Check if this child is a spouse (should stay in same ring at same radius)
+      // Check if this child is a spouse (should stay very close to same ring)
       const parentMember = memberById.get(Number(nodeId))
       const isSpouse = parentMember && Array.isArray(parentMember.spouseIds) &&
                        parentMember.spouseIds.map(Number).includes(Number(child.id))
 
-      // Spouses use SAME radius (truly same ring), separated only by angle
+      // Spouses use small offset (30px) to stay visually in same ring but avoid exact overlap
       // Others use full ring width (next ring)
-      const childRadius = isSpouse ? r : (r + RingWidth)
+      const childRadius = isSpouse ? (r + 30) : (r + RingWidth)
 
       // Check for twins/multiples: same birth date AND same parents
       let isTwin = false
@@ -912,23 +932,36 @@ function computeLayout(members, centerId) {
     const isActive = mid === Number(currentCenterMemberId.value)
     
     const birthYear = getBirthYear(m)
-    let color = '#5cb8ff' // Default blue for unknown birth year
+    let color = '#90a4ae' // Default grey for unknown birth year
 
-    // More vibrant color coding inspired by the example diagram
+    // Gradient color based on birth year (like the example diagram)
+    // Use smooth color interpolation instead of discrete buckets
     if (birthYear) {
-      if (birthYear >= 2000) {
-        color = '#ff5a8a' // Bright pink for millennials/Gen Z
-      } else if (birthYear >= 1980) {
-        color = '#ffa726' // Bright orange for Gen X/Y
-      } else if (birthYear >= 1960) {
-        color = '#ffeb3b' // Bright yellow for boomers
-      } else if (birthYear >= 1940) {
-        color = '#66bb6a' // Green for earlier generations
+      const currentYear = new Date().getFullYear()
+      const age = currentYear - birthYear
+
+      // Map age to a smooth color gradient
+      // Young (0-30): Pink to Orange
+      // Middle (30-60): Orange to Yellow
+      // Older (60-80): Yellow to Green
+      // Very old (80+): Green to Blue
+      if (age <= 30) {
+        // Pink to Orange gradient (0-30 years)
+        const ratio = age / 30
+        color = interpolateColor('#ff5a8a', '#ffa726', ratio)
+      } else if (age <= 60) {
+        // Orange to Yellow gradient (30-60 years)
+        const ratio = (age - 30) / 30
+        color = interpolateColor('#ffa726', '#ffeb3b', ratio)
+      } else if (age <= 80) {
+        // Yellow to Green gradient (60-80 years)
+        const ratio = (age - 60) / 20
+        color = interpolateColor('#ffeb3b', '#66bb6a', ratio)
       } else {
-        color = '#42a5f5' // Blue for oldest generations
+        // Green to Blue gradient (80+ years)
+        const ratio = Math.min((age - 80) / 20, 1)
+        color = interpolateColor('#66bb6a', '#42a5f5', ratio)
       }
-    } else {
-      color = '#90a4ae' // Grey for unknown birth year
     }
 
     const isDeceased = !m.isLiving || m.deathDate || m.deathDateText
