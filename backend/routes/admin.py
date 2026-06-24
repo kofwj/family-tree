@@ -291,14 +291,32 @@ def backups(_: main.User = Depends(main.require_capability('backup.view'))):
 @router.get('/admin/backups/{filename}/download')
 def download_backup(filename: str, _: main.User = Depends(main.require_capability('backup.download'))):
     target = (main.BACKUP_DIR / filename).resolve()
-    if main.BACKUP_DIR.resolve() not in target.parents or not target.exists():
+    backup_dir_resolved = main.BACKUP_DIR.resolve()
+    # 检查路径是否在 BACKUP_DIR 内且不是目录本身
+    try:
+        if not target.is_relative_to(backup_dir_resolved) or target == backup_dir_resolved:
+            raise HTTPException(404, '备份不存在')
+    except (ValueError, AttributeError):
+        # Python < 3.9 fallback
+        if backup_dir_resolved not in target.parents:
+            raise HTTPException(404, '备份不存在')
+    if not target.exists():
         raise HTTPException(404, '备份不存在')
     return FileResponse(path=target, filename=target.name, media_type='application/octet-stream')
 
 @router.delete('/admin/backups/{filename}')
 def delete_backup(filename: str, user: main.User = Depends(main.require_capability('backup.delete'))):
     target = (main.BACKUP_DIR / filename).resolve()
-    if main.BACKUP_DIR.resolve() not in target.parents or not target.exists():
+    backup_dir_resolved = main.BACKUP_DIR.resolve()
+    # 检查路径是否在 BACKUP_DIR 内且不是目录本身
+    try:
+        if not target.is_relative_to(backup_dir_resolved) or target == backup_dir_resolved:
+            raise HTTPException(404, '备份不存在')
+    except (ValueError, AttributeError):
+        # Python < 3.9 fallback
+        if backup_dir_resolved not in target.parents:
+            raise HTTPException(404, '备份不存在')
+    if not target.exists():
         raise HTTPException(404, '备份不存在')
     target.unlink()
     with Session(main.engine) as audit_session:

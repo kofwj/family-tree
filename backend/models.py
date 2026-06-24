@@ -4,11 +4,11 @@ from sqlmodel import SQLModel, Field
 
 class Member(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
-    name: str = Field(index=True)
-    former_name: Optional[str] = None
-    courtesy_name: Optional[str] = None
-    art_name: Optional[str] = None
-    childhood_name: Optional[str] = None
+    name: str = Field(index=True, max_length=100)
+    former_name: Optional[str] = Field(default=None, max_length=100)
+    courtesy_name: Optional[str] = Field(default=None, max_length=100)
+    art_name: Optional[str] = Field(default=None, max_length=100)
+    childhood_name: Optional[str] = Field(default=None, max_length=100)
     gender: Optional[str] = None
     generation: Optional[int] = Field(default=None, index=True)
     generation_name: Optional[str] = None
@@ -71,11 +71,11 @@ class User(SQLModel, table=True):
 
 class FamilyGroup(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
-    name: str = Field(index=True)
-    surname: Optional[str] = None
-    site_title: Optional[str] = None
-    cover_kicker: Optional[str] = None
-    subtitle: Optional[str] = None
+    name: str = Field(index=True, max_length=100)
+    surname: Optional[str] = Field(default=None, max_length=50)
+    site_title: Optional[str] = Field(default=None, max_length=200)
+    cover_kicker: Optional[str] = Field(default=None, max_length=100)
+    subtitle: Optional[str] = Field(default=None, max_length=200)
     description: Optional[str] = None
     root_member_id: Optional[int] = None
     primary_line: str = 'paternal'

@@ -30,7 +30,8 @@ def is_strong_password_value(password: str) -> bool:
         return False
     has_letter = any(ch.isalpha() for ch in password)
     has_digit = any(ch.isdigit() for ch in password)
-    return has_letter and has_digit
+    has_special = any(ch in "!@#$%^&*()_+-=[]{}|;:,.<>?/~`" for ch in password)
+    return has_letter and has_digit and has_special
 
 ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD', '')
 
@@ -38,7 +39,7 @@ if not IS_TESTING:
     if not JWT_SECRET or JWT_SECRET in INSECURE_JWT_SECRETS:
         raise RuntimeError('JWT_SECRET must be set to a strong non-default value in environment variables')
     if not ADMIN_PASSWORD or ADMIN_PASSWORD == 'admin123' or not is_strong_password_value(ADMIN_PASSWORD):
-        raise RuntimeError(f'ADMIN_PASSWORD must be set to a strong non-default value with at least {PASSWORD_MIN_LENGTH} chars including letters and digits')
+        raise RuntimeError(f'ADMIN_PASSWORD must be set to a strong non-default value with at least {PASSWORD_MIN_LENGTH} chars including letters, digits, and special characters')
 else:
     if not JWT_SECRET:
         JWT_SECRET = 'dev-only-family-tree-secret'

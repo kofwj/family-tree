@@ -13,6 +13,9 @@ def login(request: Request, response: Response, form: OAuth2PasswordRequestForm 
         user = session.exec(select(main.User).where(main.User.username == form.username)).first()
         if not user or not user.is_active or not main.verify_password(form.password, user.password_hash):
             main.record_login_failure(request, form.username)
+            # 记录失败的登录尝试到审计日志
+            main.write_audit_log(session, None, 'auth.login_failed', target_type='user', target_id=None, target_label=form.username, detail={'ip': request.client.host if request.client else 'unknown'})
+            session.commit()
             raise main.HTTPException(status_code=401, detail='用户名或密码错误')
         main.clear_login_failures(request, form.username)
         user.last_login_at = main.datetime.now(main.timezone.utc).isoformat()

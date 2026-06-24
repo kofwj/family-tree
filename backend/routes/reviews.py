@@ -24,7 +24,16 @@ def approve_review_request(request_id: int, reviewer: main.User = Depends(main.r
         member = session.get(main.Member, row.member_id)
         if not member:
             raise HTTPException(404, '成员不存在')
+
+        # 检查审核者是否有权限编辑该成员所属家族
+        if member.primary_family_id and not main.can_edit_family(session, reviewer, member.primary_family_id):
+            raise HTTPException(status_code=403, detail='当前账号无权编辑此成员所属家族')
+
         data = json.loads(row.payload_json or '{}')
+
+        # 字段白名单过滤：只允许 CORE_RELATION_FIELDS 中的字段
+        allowed_fields = main.CORE_RELATION_FIELDS
+        data = {k: v for k, v in data.items() if k in allowed_fields}
         
         # 验证新提交的关系是否合法或形成循环
         if 'father_id' in data:

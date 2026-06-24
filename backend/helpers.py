@@ -602,7 +602,7 @@ def ensure_default_admin(session: Session):
     return admin
 
 def create_token(user: User) -> str:
-    exp = datetime.now(timezone.utc) + timedelta(days=7)
+    exp = datetime.now(timezone.utc) + timedelta(hours=24)
     return jwt.encode({'sub': user.username, 'uid': user.id, 'role': user.role, 'exp': exp}, main.JWT_SECRET, algorithm=JWT_ALG)
 
 def get_user_capabilities(user: User) -> set[str]:
@@ -662,11 +662,16 @@ def login_rate_limit_key(request: Request, username: str) -> str:
 # store (Redis / database) before scaling out.
 # Hard cap on tracked keys so a flood of random usernames can't grow memory
 # without bound; when exceeded we drop the oldest (earliest first_attempt) entries.
-LOGIN_ATTEMPTS_MAX_KEYS = 10000
+LOGIN_ATTEMPTS_MAX_KEYS = 5000  # 降低上限，从 10000 减少到 5000
+LOGIN_ATTEMPTS_LAST_PRUNE = 0  # 上次清理的时间戳
+LOGIN_ATTEMPTS_PRUNE_INTERVAL = 60  # 每 60 秒强制清理一次
 
 
 def _prune_login_attempts(now: float):
-    """Remove expired entries, and if still over the cap, drop the oldest ones."""
+    """
+    移除过期条目，如果仍超过上限则删除最旧的条目。
+    改进：添加定期强制清理机制，防止内存耗尽。
+    """
     attempts = main.LOGIN_ATTEMPTS
     expired = [
         k for k, row in attempts.items()
@@ -683,7 +688,14 @@ def _prune_login_attempts(now: float):
 
 
 def check_login_rate_limit(request: Request, username: str):
+    global LOGIN_ATTEMPTS_LAST_PRUNE
     now = time.monotonic()
+
+    # 定期强制清理：即使没有登录失败也定期清理过期条目
+    if now - LOGIN_ATTEMPTS_LAST_PRUNE > LOGIN_ATTEMPTS_PRUNE_INTERVAL:
+        _prune_login_attempts(now)
+        LOGIN_ATTEMPTS_LAST_PRUNE = now
+
     key = login_rate_limit_key(request, username)
     row = main.LOGIN_ATTEMPTS.get(key)
     if not row:
@@ -1222,12 +1234,18 @@ def encode_spouse_ids_value(ids: list[int]) -> Optional[str]:
 
 
 def sync_member_spouse_links(session: Session, member_id: Optional[int], old_spouse_ids: list[int], new_spouse_ids: list[int]):
+    """
+    同步配偶关系。为防止并发竞态条件，在更新前刷新数据以获取最新状态。
+    注意：SQLite 的 BEGIN IMMEDIATE 已通过 session 提供基本的事务隔离。
+    """
     if not member_id:
         return
     old_ids = {sid for sid in parse_spouse_ids_value(old_spouse_ids) if sid != member_id}
     new_ids = {sid for sid in parse_spouse_ids_value(new_spouse_ids) if sid != member_id}
 
     for spouse_id in new_ids:
+        # 获取最新的配偶对象，确保读取当前数据库状态
+        session.expire_all()  # 清除缓存，强制从数据库重新读取
         spouse = session.get(Member, spouse_id)
         if not spouse:
             continue
@@ -1236,14 +1254,17 @@ def sync_member_spouse_links(session: Session, member_id: Optional[int], old_spo
             spouse_ids.append(member_id)
             spouse.spouse_ids = encode_spouse_ids_value(spouse_ids)
             session.add(spouse)
+            session.flush()  # 立即写入，减少并发窗口
 
     for spouse_id in old_ids - new_ids:
+        session.expire_all()
         spouse = session.get(Member, spouse_id)
         if not spouse:
             continue
         spouse_ids = [sid for sid in parse_spouse_ids_value(spouse.spouse_ids) if sid != member_id]
         spouse.spouse_ids = encode_spouse_ids_value(spouse_ids)
         session.add(spouse)
+        session.flush()
 
 
 def sync_spouse_marriage_details(session: Session, member: Member):
@@ -1379,6 +1400,9 @@ def clean(v):
     s = str(v).strip()
     if s in ('', 'nan', 'NaT'):
         return None
+    # 防止 Excel 公式注入：清理可能作为公式执行的前缀
+    if s and s[0] in ('=', '+', '-', '@', '\t', '\r'):
+        s = "'" + s
     return s
 
 def clean_int(v):
@@ -1753,6 +1777,9 @@ def import_excel(path: str, replace=True) -> int:
                 for family_name in unique_family_names:
                     if not family_name:
                         continue
+                    # 验证家族名称长度
+                    if len(family_name) > 100:
+                        raise ValueError(f'家族名称 "{family_name}" 长度超过 100 字符限制')
                     existing = session.exec(select(FamilyGroup).where(FamilyGroup.name == family_name)).first()
                     if existing:
                         family_name_to_id[family_name] = existing.id
@@ -1763,14 +1790,18 @@ def import_excel(path: str, replace=True) -> int:
                         session.flush()
                         if new_family.id:
                             family_name_to_id[family_name] = new_family.id
-            
+
             count = 0
             member_family_mapping = []  # 保存 (member, family_id) 用于后续建立关联
-            
+
             for _, r in df.iterrows():
                 name = clean(r['姓名'])
                 if not name:
                     continue
+
+                # 验证成员名称长度
+                if len(name) > 100:
+                    raise ValueError(f'成员姓名 "{name}" 长度超过 100 字符限制')
                 
                 # 确定所属家族
                 family_name = clean(r['所属家族']) if '所属家族' in df.columns else None

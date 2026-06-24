@@ -6,13 +6,13 @@ def test_auto_generation_on_creation(client, app_module):
     admin_token = login(client)
     response = client.post("/admin/users", json={
         "username": "editor_fixes_test",
-        "password": "EditorPass123",
+        "password": "EditorPass123!",
         "display_name": "测试编辑者",
         "role": "editor",
         "isActive": True
     }, headers=auth_headers(admin_token))
     assert response.status_code == 200, response.text
-    editor_token = login(client, username="editor_fixes_test", password="EditorPass123")
+    editor_token = login(client, username="editor_fixes_test", password="EditorPass123!")
 
     # 2. 用管理员先建一个父亲（第2代）
     father = create_member(client, admin_token, name="李老爸", gender="男", generation=2)

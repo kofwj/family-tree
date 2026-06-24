@@ -52,6 +52,14 @@ def create_member(payload: MemberCreate, user: main.User = Depends(main.require_
     data = main.filter_member_payload_for_user(user, payload, for_create=True)
     if not data.get('name'):
         raise HTTPException(status_code=403, detail='当前账号不可创建成员或缺少必要字段')
+
+    # 输入验证：名称长度限制
+    name_fields = ['name', 'former_name', 'courtesy_name', 'art_name', 'childhood_name']
+    for field in name_fields:
+        if field in data and data[field] is not None:
+            if len(str(data[field])) > 100:
+                raise HTTPException(status_code=400, detail=f'{field} 长度不能超过 100 字符')
+
     with Session(main.engine) as session:
         data = main.resolve_relation_payload(session, data)
         scope_ids = main.build_member_full_scope(session, user)
@@ -144,7 +152,16 @@ def create_member(payload: MemberCreate, user: main.User = Depends(main.require_
 @router.get('/member-photos/{filename}')
 def get_member_photo(filename: str, user: main.User = Depends(main.require_capability('member.view'))):
     target = (main.PHOTO_DIR / filename).resolve()
-    if main.PHOTO_DIR.resolve() not in target.parents or not target.exists() or not target.is_file():
+    photo_dir_resolved = main.PHOTO_DIR.resolve()
+    # 检查路径是否在 PHOTO_DIR 内且不是目录本身
+    try:
+        if not target.is_relative_to(photo_dir_resolved) or target == photo_dir_resolved:
+            raise HTTPException(404, '照片不存在')
+    except (ValueError, AttributeError):
+        # Python < 3.9 fallback
+        if photo_dir_resolved not in target.parents:
+            raise HTTPException(404, '照片不存在')
+    if not target.exists() or not target.is_file():
         raise HTTPException(404, '照片不存在')
     expected_path = f'/api/member-photos/{filename}'
     with Session(main.engine) as session:
@@ -183,6 +200,14 @@ def upload_member_photo(member_id: int, file: UploadFile = File(...), user: main
 def update_member(member_id: int, payload: MemberUpdate, user: main.User = Depends(main.require_capability('member.edit_profile'))):
     main.backup_db(f'before-update-{member_id}')
     raw_data = payload.model_dump(exclude_unset=True)
+
+    # 输入验证：名称长度限制
+    name_fields = ['name', 'former_name', 'courtesy_name', 'art_name', 'childhood_name']
+    for field in name_fields:
+        if field in raw_data and raw_data[field] is not None:
+            if len(str(raw_data[field])) > 100:
+                raise HTTPException(status_code=400, detail=f'{field} 长度不能超过 100 字符')
+
     data = main.filter_member_payload_for_user(user, payload, for_create=False)
     requested_structure = {k: v for k, v in raw_data.items() if k in main.CORE_RELATION_FIELDS}
     with Session(main.engine) as session:

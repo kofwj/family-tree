@@ -147,13 +147,13 @@ def test_editor_can_set_relationships_on_creation(client, app_module):
     admin_token = login(client)
     response = client.post("/admin/users", json={
         "username": "editor1",
-        "password": "EditorPass123",
+        "password": "EditorPass123!",
         "display_name": "编辑者",
         "role": "editor",
         "is_active": True
     }, headers=auth_headers(admin_token))
     assert response.status_code == 200, response.text
-    editor_token = login(client, username="editor1", password="EditorPass123")
+    editor_token = login(client, username="editor1", password="EditorPass123!")
     a = create_member(client, admin_token, name="老员A", gender="男")
     b = create_member(client, admin_token, name="老员B", gender="女")
     

@@ -69,18 +69,27 @@ def update_family(family_id: int, payload: Dict[str, Any], user: main.User = Dep
         # Check family-level edit permission
         if not main.can_edit_family(session, user, family_id):
             raise HTTPException(status_code=403, detail='当前账号无权编辑该家族')
-        
+
         family = session.get(main.FamilyGroup, family_id)
         if not family:
             raise HTTPException(status_code=404, detail='家族不存在')
-        
+
         # Update allowed fields based on role
         all_family_fields = {'name', 'surname', 'site_title', 'cover_kicker', 'subtitle', 'description', 'root_member_id', 'primary_line', 'sort_order'}
         if main.can_admin_family(session, user, family_id):
             allowed_fields = all_family_fields
         else:
             allowed_fields = {'site_title', 'cover_kicker', 'subtitle', 'description'}
-        
+
+        # 输入验证：长度限制
+        max_lengths = {
+            'name': 100,
+            'surname': 50,
+            'site_title': 200,
+            'cover_kicker': 100,
+            'subtitle': 200
+        }
+
         for key, value in payload.items():
             snake_key = ''.join(['_' + c.lower() if c.isupper() else c for c in key]).lstrip('_')
             if snake_key in all_family_fields:
@@ -89,6 +98,10 @@ def update_family(family_id: int, payload: Dict[str, Any], user: main.User = Dep
                     if current_val != value:
                         raise HTTPException(status_code=403, detail='当前账号无权编辑该家族的结构性属性')
                 else:
+                    # 验证字符串长度
+                    if snake_key in max_lengths and value is not None:
+                        if isinstance(value, str) and len(value) > max_lengths[snake_key]:
+                            raise HTTPException(status_code=400, detail=f'{key} 长度不能超过 {max_lengths[snake_key]} 字符')
                     setattr(family, snake_key, value)
         
         family.updated_at = datetime.now(timezone.utc).isoformat()
