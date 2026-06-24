@@ -225,13 +225,44 @@ let chartInstance = null
 
 const authenticatedPhotos = ref(new Map())
 
+// Convert image to circular clipped data URL
+function createCircularImage(imageUrl, size = 200) {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    img.crossOrigin = 'anonymous'
+    img.onload = () => {
+      const canvas = document.createElement('canvas')
+      canvas.width = size
+      canvas.height = size
+      const ctx = canvas.getContext('2d')
+
+      // Clip to circle
+      ctx.beginPath()
+      ctx.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2)
+      ctx.closePath()
+      ctx.clip()
+
+      // Draw image centered and cover the circle
+      const scale = Math.max(size / img.width, size / img.height)
+      const x = (size - img.width * scale) / 2
+      const y = (size - img.height * scale) / 2
+      ctx.drawImage(img, x, y, img.width * scale, img.height * scale)
+
+      resolve(canvas.toDataURL('image/png'))
+    }
+    img.onerror = reject
+    img.src = imageUrl
+  })
+}
+
 async function loadMemberPhotos() {
   for (const m of props.members || []) {
     const mid = Number(m.id)
     if (m.photoUrl && !authenticatedPhotos.value.has(mid)) {
       try {
         const blobUrl = await fetchAuthenticatedObjectUrl(m.photoUrl)
-        authenticatedPhotos.value.set(mid, blobUrl)
+        const circularUrl = await createCircularImage(blobUrl, 200)
+        authenticatedPhotos.value.set(mid, circularUrl)
         if (displayMode.value === 'flow') {
           renderChart()
         }
@@ -576,8 +607,8 @@ function computeLayout(members, centerId) {
     }
   }
 
-  // Ring intervals - increased from 120 to 160 to reduce overlap
-  const RingWidth = 160
+  // Ring intervals - increased from 160 to 200 to further reduce overlap
+  const RingWidth = 200
   
   // Coordinates mapping in polar: memberId -> { r, thetaDegrees }
   const coords = new Map()
@@ -621,12 +652,25 @@ function computeLayout(members, centerId) {
     const span = thetaMax - thetaMin
 
     // Calculate minimum angle needed per node to avoid overlap
-    // Node diameter ~40px, at radius r, minimum angular separation in radians
-    const minAngleSeparation = Math.max(0.15, (50 / (r + 1))) // At least ~8.6 degrees
+    // Based on actual node border size at this ring level
+    const ringLevel = Math.floor(r / RingWidth)
+    let nodeDiameter
+    if (ringLevel === 0) {
+      nodeDiameter = 48
+    } else if (ringLevel === 1) {
+      nodeDiameter = 36
+    } else {
+      nodeDiameter = Math.max(20, 36 - (ringLevel - 1) * 4)
+    }
+
+    // Arc length = radius × angle, so angle = arc_length / radius
+    // Add 25% padding for visual breathing room
+    const minAngleSeparation = (nodeDiameter * 1.25) / (r + 1)
     const minSpanNeeded = minAngleSeparation * children.length
 
-    // If not enough space, use minimum spacing (nodes will be tighter but not overlapping)
-    const step = span >= minSpanNeeded ? (span / children.length) : minAngleSeparation
+    // If not enough space, nodes will be distributed evenly in available span
+    // This may cause slight overlap, but better than completely breaking out of sector
+    const step = span >= minSpanNeeded ? (span / children.length) : (span / children.length)
 
     const childrenMembers = children.map(cid => memberById.get(cid)).filter(Boolean)
 
@@ -679,11 +723,23 @@ function computeLayout(members, centerId) {
     const span = thetaMax - thetaMin
 
     // Calculate minimum angle needed per node to avoid overlap
-    const minAngleSeparation = Math.max(0.15, (50 / (r + 1)))
+    // Based on actual node border size at Ring 1
+    const ringLevel = Math.floor(r / RingWidth)
+    let nodeDiameter
+    if (ringLevel === 0) {
+      nodeDiameter = 48
+    } else if (ringLevel === 1) {
+      nodeDiameter = 36
+    } else {
+      nodeDiameter = Math.max(20, 36 - (ringLevel - 1) * 4)
+    }
+
+    // Arc length = radius × angle, add 25% padding
+    const minAngleSeparation = (nodeDiameter * 1.25) / (r + 1)
     const minSpanNeeded = minAngleSeparation * nodesList.length
 
-    // If not enough space, use minimum spacing
-    const step = span >= minSpanNeeded ? (span / nodesList.length) : minAngleSeparation
+    // Distribute nodes evenly in available span (stay within sector boundaries)
+    const step = span / nodesList.length
 
     // Assign angles clockwise from thetaMin
     let currentTheta = thetaMin
