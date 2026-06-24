@@ -567,14 +567,13 @@ function computeLayout(members, centerId) {
     for (const n of neighbors) {
       if (!visited.has(n)) {
         visited.add(n)
-        distance.set(n, dist + 1)
-        bfsParent.set(n, curr)
-        bfsChildren.get(curr).push(n)
-        
+
         // Compute relationship path description
         const currMember = memberById.get(Number(curr))
         const nMember = memberById.get(Number(n))
         let localRel = ''
+        let isSpouseOfCurrent = false
+
         if (currMember && nMember) {
           const nId = Number(n)
           if (currMember.fatherId && Number(currMember.fatherId) === nId) {
@@ -583,6 +582,7 @@ function computeLayout(members, centerId) {
             localRel = '母亲'
           } else if (Array.isArray(currMember.spouseIds) && currMember.spouseIds.map(Number).includes(nId)) {
             localRel = '配偶'
+            isSpouseOfCurrent = true
           } else if ((nMember.fatherId && Number(nMember.fatherId) === Number(curr)) || (nMember.motherId && Number(nMember.motherId) === Number(curr))) {
             localRel = nMember.gender === '女' ? '女儿' : '儿子'
           } else if ((currMember.fatherId && currMember.fatherId === nMember.fatherId) || (currMember.motherId && currMember.motherId === nMember.motherId)) {
@@ -593,7 +593,17 @@ function computeLayout(members, centerId) {
         } else {
           localRel = '亲属'
         }
-        
+
+        // Spouses of center person stay at distance 0 (same ring as center)
+        let nodeDist = dist + 1
+        if (dist === 0 && isSpouseOfCurrent) {
+          nodeDist = 0
+        }
+
+        distance.set(n, nodeDist)
+        bfsParent.set(n, curr)
+        bfsChildren.get(curr).push(n)
+
         let finalRel = ''
         if (Number(curr) === Number(centerId)) {
           finalRel = localRel
@@ -601,7 +611,7 @@ function computeLayout(members, centerId) {
           finalRel = `${parentRelation}的${localRel}`
         }
         relationToCenter.set(Number(n), finalRel)
-        
+
         queue.push(n)
       }
     }
@@ -674,8 +684,17 @@ function computeLayout(members, centerId) {
 
     const childrenMembers = children.map(cid => memberById.get(cid)).filter(Boolean)
 
-    // Sort by birth date to establish birth order
+    // Sort by rank in family (排行) first, then by birth date as fallback
     childrenMembers.sort((a, b) => {
+      // First try to sort by rankInFamily
+      const rankA = a.rankInFamily || a.rank_in_family || 0
+      const rankB = b.rankInFamily || b.rank_in_family || 0
+
+      if (rankA && rankB && rankA !== rankB) {
+        return rankA - rankB
+      }
+
+      // Fallback to birth date if ranks are not available or equal
       const birthA = a.birthDate || a.birthDateText || ''
       const birthB = b.birthDate || b.birthDateText || ''
       return birthA.localeCompare(birthB)
@@ -823,19 +842,37 @@ function computeLayout(members, centerId) {
     })
   }
   siblingsList.sort((a, b) => {
+    // Sort siblings by rank first, then birth date
+    const rankA = a.rankInFamily || a.rank_in_family || 0
+    const rankB = b.rankInFamily || b.rank_in_family || 0
+
+    if (rankA && rankB && rankA !== rankB) {
+      return rankA - rankB
+    }
+
     const birthA = a.birthDate || a.birthDateText || ''
     const birthB = b.birthDate || b.birthDateText || ''
     return birthA.localeCompare(birthB)
   })
   childrenList.sort((a, b) => {
+    // Sort children by rank first, then birth date
+    const rankA = a.rankInFamily || a.rank_in_family || 0
+    const rankB = b.rankInFamily || b.rank_in_family || 0
+
+    if (rankA && rankB && rankA !== rankB) {
+      return rankA - rankB
+    }
+
     const birthA = a.birthDate || a.birthDateText || ''
     const birthB = b.birthDate || b.birthDateText || ''
     return birthA.localeCompare(birthB)
   })
 
   // Partition sectors
+  // Spouses stay close to center (half ring distance) to show they are in the same generation
+  const spouseRadius = RingWidth * 0.6 // 60% of ring width, closer to center
   partitionSector(parentsList, Math.PI / 3, 2 * Math.PI / 3, RingWidth)
-  partitionSector(spousesList, -Math.PI / 6, Math.PI / 4, RingWidth)
+  partitionSector(spousesList, -Math.PI / 6, Math.PI / 4, spouseRadius)
   partitionSector(siblingsList, Math.PI, 5 * Math.PI / 4, RingWidth)
   partitionSector(childrenList, 4 * Math.PI / 3, 11 * Math.PI / 6, RingWidth)
   partitionSector(othersList, 2 * Math.PI / 3, Math.PI, RingWidth)
