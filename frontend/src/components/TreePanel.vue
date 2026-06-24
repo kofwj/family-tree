@@ -594,10 +594,11 @@ function computeLayout(members, centerId) {
           localRel = '亲属'
         }
 
-        // Spouses of center person stay at distance 0 (same ring as center)
+        // Spouses stay at the same distance as their partner (same ring)
+        // This applies to all spouse relationships, not just center's spouses
         let nodeDist = dist + 1
-        if (dist === 0 && isSpouseOfCurrent) {
-          nodeDist = 0
+        if (isSpouseOfCurrent) {
+          nodeDist = dist // Spouse has same distance as current node
         }
 
         distance.set(n, nodeDist)
@@ -706,6 +707,14 @@ function computeLayout(members, centerId) {
     for (let i = 0; i < childrenMembers.length; i++) {
       const child = childrenMembers[i]
 
+      // Check if this child is a spouse (should stay in same ring with small offset)
+      const parentMember = memberById.get(Number(nodeId))
+      const isSpouse = parentMember && Array.isArray(parentMember.spouseIds) &&
+                       parentMember.spouseIds.map(Number).includes(Number(child.id))
+
+      // Spouses use small offset, others use full ring width
+      const childRadius = isSpouse ? (r + 20) : (r + RingWidth)
+
       // Check for twins/multiples: same birth date AND same parents
       let isTwin = false
       if (i < childrenMembers.length - 1) {
@@ -720,17 +729,17 @@ function computeLayout(members, centerId) {
       if (isTwin) {
         // For twins, place them at the same angle (they'll be at the same point)
         // The arrow will split to both from this point
-        assignAngles(child.id, currentTheta, currentTheta + step, r + RingWidth)
+        assignAngles(child.id, currentTheta, currentTheta + step, childRadius)
 
         // Process the twin sibling
         i++
         const twin2 = childrenMembers[i]
-        assignAngles(twin2.id, currentTheta, currentTheta + step, r + RingWidth)
+        assignAngles(twin2.id, currentTheta, currentTheta + step, childRadius)
 
         currentTheta += step
       } else {
         // Single child: assign the current angle and recurse
-        assignAngles(child.id, currentTheta, currentTheta + step, r + RingWidth)
+        assignAngles(child.id, currentTheta, currentTheta + step, childRadius)
         currentTheta += step
       }
     }
