@@ -576,8 +576,8 @@ function computeLayout(members, centerId) {
     }
   }
 
-  // Ring intervals
-  const RingWidth = 120
+  // Ring intervals - increased from 120 to 160 to reduce overlap
+  const RingWidth = 160
   
   // Coordinates mapping in polar: memberId -> { r, thetaDegrees }
   const coords = new Map()
@@ -619,19 +619,31 @@ function computeLayout(members, centerId) {
     if (children.length === 0) return
 
     const span = thetaMax - thetaMin
-    const step = span / children.length
-    
+
+    // Calculate minimum angle needed per node to avoid overlap
+    // Node diameter ~40px, at radius r, minimum angular separation in radians
+    const minAngleSeparation = Math.max(0.15, (50 / (r + 1))) // At least ~8.6 degrees
+    const minSpanNeeded = minAngleSeparation * children.length
+
+    // If not enough space, use minimum spacing (nodes will be tighter but not overlapping)
+    const step = span >= minSpanNeeded ? (span / children.length) : minAngleSeparation
+
     const childrenMembers = children.map(cid => memberById.get(cid)).filter(Boolean)
+
+    // Sort by birth date to establish birth order
     childrenMembers.sort((a, b) => {
       const birthA = a.birthDate || a.birthDateText || ''
       const birthB = b.birthDate || b.birthDateText || ''
       return birthA.localeCompare(birthB)
     })
-    
-    let currentThetaMin = thetaMin
+
+    // Assign angles clockwise from thetaMin (oldest child first, proceeding clockwise)
+    // In polar coordinates, decreasing angle = clockwise, so we subtract step each time
+    let currentTheta = thetaMin
     for (let i = 0; i < childrenMembers.length; i++) {
       const child = childrenMembers[i]
-      
+
+      // Check for twins/multiples: same birth date AND same parents
       let isTwin = false
       if (i < childrenMembers.length - 1) {
         const nextChild = childrenMembers[i + 1]
@@ -641,20 +653,22 @@ function computeLayout(members, centerId) {
           isTwin = true
         }
       }
-      
+
       if (isTwin) {
-        const twin1Id = child.id
-        const twin2Id = childrenMembers[i + 1].id
-        
-        const midTheta = currentThetaMin + step / 2
-        assignAngles(twin1Id, currentThetaMin, midTheta, r + RingWidth)
-        assignAngles(twin2Id, midTheta, currentThetaMin + step, r + RingWidth)
-        
+        // For twins, place them at the same angle (they'll be at the same point)
+        // The arrow will split to both from this point
+        assignAngles(child.id, currentTheta, currentTheta + step, r + RingWidth)
+
+        // Process the twin sibling
         i++
-        currentThetaMin += step
+        const twin2 = childrenMembers[i]
+        assignAngles(twin2.id, currentTheta, currentTheta + step, r + RingWidth)
+
+        currentTheta += step
       } else {
-        assignAngles(child.id, currentThetaMin, currentThetaMin + step, r + RingWidth)
-        currentThetaMin += step
+        // Single child: assign the current angle and recurse
+        assignAngles(child.id, currentTheta, currentTheta + step, r + RingWidth)
+        currentTheta += step
       }
     }
   }
@@ -663,12 +677,20 @@ function computeLayout(members, centerId) {
     if (nodesList.length === 0) return
 
     const span = thetaMax - thetaMin
-    const step = span / nodesList.length
-    
-    let currentThetaMin = thetaMin
+
+    // Calculate minimum angle needed per node to avoid overlap
+    const minAngleSeparation = Math.max(0.15, (50 / (r + 1)))
+    const minSpanNeeded = minAngleSeparation * nodesList.length
+
+    // If not enough space, use minimum spacing
+    const step = span >= minSpanNeeded ? (span / nodesList.length) : minAngleSeparation
+
+    // Assign angles clockwise from thetaMin
+    let currentTheta = thetaMin
     for (let i = 0; i < nodesList.length; i++) {
       const member = nodesList[i]
-      
+
+      // Check for twins/multiples
       let isTwin = false
       if (i < nodesList.length - 1) {
         const nextMember = nodesList[i + 1]
@@ -678,20 +700,20 @@ function computeLayout(members, centerId) {
           isTwin = true
         }
       }
-      
+
       if (isTwin) {
+        // Place twins at the same angle
         const twin1 = member
         const twin2 = nodesList[i + 1]
-        
-        const midTheta = currentThetaMin + step / 2
-        assignAngles(twin1.id, currentThetaMin, midTheta, r)
-        assignAngles(twin2.id, midTheta, currentThetaMin + step, r)
-        
+
+        assignAngles(twin1.id, currentTheta, currentTheta + step, r)
+        assignAngles(twin2.id, currentTheta, currentTheta + step, r)
+
         i++
-        currentThetaMin += step
+        currentTheta += step
       } else {
-        assignAngles(member.id, currentThetaMin, currentThetaMin + step, r)
-        currentThetaMin += step
+        assignAngles(member.id, currentTheta, currentTheta + step, r)
+        currentTheta += step
       }
     }
   }
@@ -722,8 +744,27 @@ function computeLayout(members, centerId) {
 
   // Sort lists
   if (Array.isArray(rootMember.spouseIds)) {
-    const spouseIdNums = rootMember.spouseIds.map(Number)
-    spousesList.sort((a, b) => spouseIdNums.indexOf(Number(a.id)) - spouseIdNums.indexOf(Number(b.id)))
+    // Sort spouses by marriage year if available, otherwise maintain spouseIds order
+    spousesList.sort((a, b) => {
+      // Extract marriage year from each spouse
+      // Note: marriage_year in Member model stores the marriage year with THIS person's partner
+      // Since we're looking at rootMember's spouses, we check each spouse's data
+      const marriageYearA = a.marriageYear || a.marriage_year || ''
+      const marriageYearB = b.marriageYear || b.marriage_year || ''
+
+      // If both have marriage years, sort by year (earlier first = clockwise from starting angle)
+      if (marriageYearA && marriageYearB) {
+        return marriageYearA.localeCompare(marriageYearB)
+      }
+
+      // If only one has a marriage year, it comes first
+      if (marriageYearA && !marriageYearB) return -1
+      if (!marriageYearA && marriageYearB) return 1
+
+      // If neither has a marriage year, maintain original spouseIds order
+      const spouseIdNums = rootMember.spouseIds.map(Number)
+      return spouseIdNums.indexOf(Number(a.id)) - spouseIdNums.indexOf(Number(b.id))
+    })
   }
   siblingsList.sort((a, b) => {
     const birthA = a.birthDate || a.birthDateText || ''
@@ -815,6 +856,25 @@ function computeLayout(members, centerId) {
       }
     }
 
+    // Dynamic node size based on distance from center
+    // Center: 48/42, Ring 1: 36/30, Ring 2+: gradually smaller
+    const ringLevel = Math.floor(r / RingWidth)
+    let borderSize, nodeSize, fontSize
+    if (mid === centerId) {
+      borderSize = 48
+      nodeSize = 42
+      fontSize = 11
+    } else if (ringLevel === 1) {
+      borderSize = 36
+      nodeSize = 30
+      fontSize = 9
+    } else {
+      // Gradually reduce size for outer rings (min 20px)
+      borderSize = Math.max(20, 36 - (ringLevel - 1) * 4)
+      nodeSize = Math.max(16, 30 - (ringLevel - 1) * 4)
+      fontSize = Math.max(7, 9 - (ringLevel - 1) * 0.5)
+    }
+
     if (photoUrl) {
       // 1. Push border ring node (bottom layer)
       echartsNodes.push({
@@ -822,7 +882,7 @@ function computeLayout(members, centerId) {
         x: x,
         y: y,
         symbol: 'circle',
-        symbolSize: mid === centerId ? 48 : 36,
+        symbolSize: borderSize,
         itemStyle: {
           color: 'none',
           borderColor: isActive ? '#c48b58' : (isDeceased ? '#666666' : color),
@@ -840,14 +900,14 @@ function computeLayout(members, centerId) {
         x: x,
         y: y,
         symbol: `image://${photoUrl}`,
-        symbolSize: mid === centerId ? 42 : 30,
+        symbolSize: nodeSize,
         label: {
           show: true,
           formatter: m.name,
           position: labelPosition,
           distance: 6,
           color: '#ffffff',
-          fontSize: mid === centerId ? 11 : 9,
+          fontSize: fontSize,
           fontWeight: mid === centerId ? 'bold' : 'normal',
           rotate: 0,
           textBorderColor: 'rgba(0,0,0,0.8)',
@@ -863,7 +923,7 @@ function computeLayout(members, centerId) {
           x: x,
           y: y,
           symbol: 'circle',
-          symbolSize: mid === centerId ? 42 : 30,
+          symbolSize: nodeSize,
           itemStyle: {
             color: 'rgba(128, 128, 128, 0.4)',
             decal: {
@@ -885,7 +945,7 @@ function computeLayout(members, centerId) {
         x: x,
         y: y,
         symbol: 'circle',
-        symbolSize: mid === centerId ? 42 : 30,
+        symbolSize: nodeSize,
         itemStyle: {
           color: isDeceased ? '#a0a0a0' : color,
           borderColor: isActive ? '#c48b58' : (isDeceased ? '#666666' : '#ffffff'),
@@ -906,7 +966,7 @@ function computeLayout(members, centerId) {
           position: labelPosition,
           distance: 6,
           color: '#ffffff',
-          fontSize: mid === centerId ? 11 : 9,
+          fontSize: fontSize,
           fontWeight: mid === centerId ? 'bold' : 'normal',
           rotate: 0,
           textBorderColor: 'rgba(0,0,0,0.8)',
@@ -1048,10 +1108,44 @@ function computeLayout(members, centerId) {
                 symbolSize: [0, 6]
               })
             } else {
-              // Use vector average for avgTheta to avoid wrap-around issues
-              const sumCos = closeChildren.reduce((sum, c) => sum + Math.cos(c.cChild.thetaDegrees * Math.PI / 180), 0)
-              const sumSin = closeChildren.reduce((sum, c) => sum + Math.sin(c.cChild.thetaDegrees * Math.PI / 180), 0)
-              let avgTheta = Math.atan2(sumSin, sumCos) * 180 / Math.PI
+              // Group children by position to detect twins (same angle)
+              const childGroups = []
+              let currentGroup = [closeChildren[0]]
+
+              for (let i = 1; i < closeChildren.length; i++) {
+                const prevChild = closeChildren[i - 1]
+                const currChild = closeChildren[i]
+
+                // If angles are very close (< 0.01 rad ~= 0.6 deg), they're twins
+                const angleDiff = Math.abs(currChild.cChild.thetaDegrees - prevChild.cChild.thetaDegrees)
+                if (angleDiff < 0.6) {
+                  currentGroup.push(currChild)
+                } else {
+                  childGroups.push(currentGroup)
+                  currentGroup = [currChild]
+                }
+              }
+              childGroups.push(currentGroup)
+
+              // Calculate the angular span of children for better bracket placement
+              // Use the midpoint of the angular range rather than vector average
+              let minTheta = closeChildren[0].cChild.thetaDegrees
+              let maxTheta = closeChildren[0].cChild.thetaDegrees
+
+              for (const c of closeChildren) {
+                const theta = c.cChild.thetaDegrees
+                // Handle wrap-around at 0/360 degrees
+                let normalizedTheta = theta
+                if (Math.abs(theta - minTheta) > 180) {
+                  normalizedTheta = theta < 180 ? theta + 360 : theta - 360
+                }
+                if (normalizedTheta < minTheta) minTheta = normalizedTheta
+                if (normalizedTheta > maxTheta) maxTheta = normalizedTheta
+              }
+
+              // Use the midpoint of the angular range
+              let avgTheta = (minTheta + maxTheta) / 2
+              // Normalize back to 0-360
               avgTheta = ((avgTheta % 360) + 360) % 360
 
               // Place the bracket exactly halfway between the child ring and the immediate inner ring
@@ -1080,23 +1174,107 @@ function computeLayout(members, centerId) {
                 }
               })
 
-              for (const cc of closeChildren) {
-                let diff = cc.cChild.thetaDegrees - avgTheta
-                if (diff > 180) diff -= 360
-                if (diff < -180) diff += 360
-                const curveness = Math.sin(diff * Math.PI / 180) * 0.2
+              // Draw arrows from ccNode to each child or child group
+              for (const group of childGroups) {
+                if (group.length === 1) {
+                  // Single child: direct arrow
+                  const cc = group[0]
+                  let diff = cc.cChild.thetaDegrees - avgTheta
+                  if (diff > 180) diff -= 360
+                  if (diff < -180) diff += 360
+                  const curveness = Math.sin(diff * Math.PI / 180) * 0.2
 
-                echartsLinks.push({
-                  source: ccNodeId,
-                  target: String(cc.childId),
-                  lineStyle: {
-                    color: '#4d7cff',
-                    width: 2,
-                    curveness: curveness
-                  },
-                  symbol: ['none', 'arrow'],
-                  symbolSize: [0, 6]
-                })
+                  echartsLinks.push({
+                    source: ccNodeId,
+                    target: String(cc.childId),
+                    lineStyle: {
+                      color: '#4d7cff',
+                      width: 2,
+                      curveness: curveness
+                    },
+                    symbol: ['none', 'arrow'],
+                    symbolSize: [0, 6]
+                  })
+                } else {
+                  // Twins/multiples: create a split point at their shared location
+                  const twinTheta = group[0].cChild.thetaDegrees
+                  const twinR = group[0].cChild.r
+
+                  // Split point is slightly before the twins (80% of the way from ccNode)
+                  const splitR = rCC + (twinR - rCC) * 0.8
+                  const splitThetaRad = twinTheta * Math.PI / 180
+                  const xSplit = splitR * Math.cos(splitThetaRad)
+                  const ySplit = -splitR * Math.sin(splitThetaRad)
+
+                  const splitNodeId = `split-${coupleKey}-${group[0].childId}`
+                  echartsNodes.push({
+                    id: splitNodeId,
+                    x: xSplit,
+                    y: ySplit,
+                    symbolSize: 6,
+                    itemStyle: { color: '#4d7cff' },
+                    label: { show: false }
+                  })
+
+                  // Arrow from ccNode to split point
+                  let diff = twinTheta - avgTheta
+                  if (diff > 180) diff -= 360
+                  if (diff < -180) diff += 360
+                  const curveness = Math.sin(diff * Math.PI / 180) * 0.2
+
+                  echartsLinks.push({
+                    source: ccNodeId,
+                    target: splitNodeId,
+                    lineStyle: {
+                      color: '#4d7cff',
+                      width: 2,
+                      curveness: curveness
+                    }
+                  })
+
+                  // Arrows from split point to each twin (slight offset for visual separation)
+                  const offsetAngle = 3 // degrees
+                  group.forEach((twin, idx) => {
+                    const offset = (idx - (group.length - 1) / 2) * offsetAngle
+                    const targetTheta = twinTheta + offset
+                    const targetThetaRad = targetTheta * Math.PI / 180
+                    const xTarget = twinR * Math.cos(targetThetaRad)
+                    const yTarget = -twinR * Math.sin(targetThetaRad)
+
+                    // Create a virtual target point with slight offset
+                    const virtualTargetId = `twin-target-${twin.childId}`
+                    echartsNodes.push({
+                      id: virtualTargetId,
+                      x: xTarget,
+                      y: yTarget,
+                      symbolSize: 0,
+                      itemStyle: { opacity: 0 },
+                      label: { show: false }
+                    })
+
+                    echartsLinks.push({
+                      source: splitNodeId,
+                      target: virtualTargetId,
+                      lineStyle: {
+                        color: '#4d7cff',
+                        width: 2
+                      },
+                      symbol: ['none', 'arrow'],
+                      symbolSize: [0, 6]
+                    })
+
+                    // Link virtual target to actual twin
+                    echartsLinks.push({
+                      source: virtualTargetId,
+                      target: String(twin.childId),
+                      lineStyle: {
+                        color: '#4d7cff',
+                        width: 0,
+                        opacity: 0
+                      }
+                    })
+                  })
+                }
               }
             }
           }
