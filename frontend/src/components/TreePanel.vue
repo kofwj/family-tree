@@ -869,8 +869,9 @@ function computeLayout(members, centerId) {
   })
 
   // Partition sectors
-  // Spouses stay close to center (half ring distance) to show they are in the same generation
-  const spouseRadius = RingWidth * 0.6 // 60% of ring width, closer to center
+  // Spouses stay very close to center (minimal separation) to show they are in the same generation
+  // Use a small radius (1/4 node size) to prevent exact overlap while appearing in the same ring
+  const spouseRadius = 20 // Very small radius, just enough to separate from center visually
   partitionSector(parentsList, Math.PI / 3, 2 * Math.PI / 3, RingWidth)
   partitionSector(spousesList, -Math.PI / 6, Math.PI / 4, spouseRadius)
   partitionSector(siblingsList, Math.PI, 5 * Math.PI / 4, RingWidth)
