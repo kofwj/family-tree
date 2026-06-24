@@ -1162,20 +1162,24 @@ function computeLayout(members, centerId) {
 
         const c1 = coords.get(mid)
         const c2 = coords.get(sid)
-        
+
         let diff = c2.thetaDegrees - c1.thetaDegrees
         if (diff > 180) diff -= 360
         if (diff < -180) diff += 360
-        
-        const spouseCurveness = -Math.sign(diff) * 0.18
+
+        // More elegant curve for spouse connection (like the example)
+        // Larger curvature for closer spouses, smoother arc
+        const angularDistance = Math.abs(diff)
+        let spouseCurveness = -Math.sign(diff) * Math.min(0.3, 0.15 + angularDistance / 600)
 
         echartsLinks.push({
           source: String(mid),
           target: String(sid),
           lineStyle: {
-            color: '#ff4d4d',
-            width: 3,
-            curveness: spouseCurveness
+            color: '#e91e63', // More vibrant red-pink (like example)
+            width: 2.5, // Slightly thinner for elegance
+            curveness: spouseCurveness,
+            opacity: 0.9
           }
         })
 
@@ -1269,12 +1273,13 @@ function computeLayout(members, centerId) {
                 source: parentSourceId,
                 target: String(closeChildren[0].childId),
                 lineStyle: {
-                  color: '#4d7cff',
+                  color: '#2196f3', // Brighter blue (like example)
                   width: 2,
-                  curveness: 0.05
+                  curveness: 0.08, // Gentle curve
+                  opacity: 0.85
                 },
                 symbol: ['none', 'arrow'],
-                symbolSize: [0, 6]
+                symbolSize: [0, 8] // Slightly larger arrow
               })
             } else {
               // Group children by position to detect twins (same angle)
@@ -1338,31 +1343,33 @@ function computeLayout(members, centerId) {
                 source: parentSourceId,
                 target: ccNodeId,
                 lineStyle: {
-                  color: '#4d7cff',
-                  width: 2
+                  color: '#2196f3', // Brighter blue
+                  width: 2,
+                  opacity: 0.85
                 }
               })
 
               // Draw arrows from ccNode to each child or child group
               for (const group of childGroups) {
                 if (group.length === 1) {
-                  // Single child: direct arrow
+                  // Single child: direct arrow with smooth curve
                   const cc = group[0]
                   let diff = cc.cChild.thetaDegrees - avgTheta
                   if (diff > 180) diff -= 360
                   if (diff < -180) diff += 360
-                  const curveness = Math.sin(diff * Math.PI / 180) * 0.2
+                  const curveness = Math.sin(diff * Math.PI / 180) * 0.15 // Gentler curve
 
                   echartsLinks.push({
                     source: ccNodeId,
                     target: String(cc.childId),
                     lineStyle: {
-                      color: '#4d7cff',
+                      color: '#2196f3', // Brighter blue
                       width: 2,
-                      curveness: curveness
+                      curveness: curveness,
+                      opacity: 0.85
                     },
                     symbol: ['none', 'arrow'],
-                    symbolSize: [0, 6]
+                    symbolSize: [0, 8] // Larger arrow
                   })
                 } else {
                   // Twins/multiples: create a split point at their shared location
@@ -1389,15 +1396,16 @@ function computeLayout(members, centerId) {
                   let diff = twinTheta - avgTheta
                   if (diff > 180) diff -= 360
                   if (diff < -180) diff += 360
-                  const curveness = Math.sin(diff * Math.PI / 180) * 0.2
+                  const curveness = Math.sin(diff * Math.PI / 180) * 0.15 // Gentler curve
 
                   echartsLinks.push({
                     source: ccNodeId,
                     target: splitNodeId,
                     lineStyle: {
-                      color: '#4d7cff',
+                      color: '#2196f3', // Brighter blue
                       width: 2,
-                      curveness: curveness
+                      curveness: curveness,
+                      opacity: 0.85
                     }
                   })
 
@@ -1425,11 +1433,12 @@ function computeLayout(members, centerId) {
                       source: splitNodeId,
                       target: virtualTargetId,
                       lineStyle: {
-                        color: '#4d7cff',
-                        width: 2
+                        color: '#2196f3', // Brighter blue
+                        width: 2,
+                        opacity: 0.85
                       },
                       symbol: ['none', 'arrow'],
-                      symbolSize: [0, 6]
+                      symbolSize: [0, 8] // Larger arrow
                     })
 
                     // Link virtual target to actual twin
@@ -1437,7 +1446,7 @@ function computeLayout(members, centerId) {
                       source: virtualTargetId,
                       target: String(twin.childId),
                       lineStyle: {
-                        color: '#4d7cff',
+                        color: '#2196f3',
                         width: 0,
                         opacity: 0
                       }
