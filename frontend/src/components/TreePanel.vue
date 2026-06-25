@@ -136,14 +136,7 @@
     </div>
 
     <div v-else class="tree-wrap flow-wrap sunburst-wrap">
-      <FlowChart
-        ref="flowChartRef"
-        :members="props.members"
-        :active-member-id="currentFocusMemberId"
-        :search-keyword="searchKeyword"
-        :generation-limit="generationLimit"
-        @node-click="handleFlowNodeClick"
-      />
+      <div ref="chartRef" class="sunburst-chart-canvas"></div>
 
       <!-- Floating Legend -->
       <div class="flow-chart-legend">
@@ -151,27 +144,47 @@
         <div class="legend-group">
           <div class="legend-group-title">关系连线</div>
           <div class="legend-item">
-            <span class="legend-line line-child"></span>
-            <span>亲子关系 (实线)</span>
+            <span class="legend-line line-spouse"></span>
+            <span>配偶 (亮红实体弧线)</span>
           </div>
           <div class="legend-item">
-            <span class="legend-line line-spouse"></span>
-            <span>配偶关系 (虚线)</span>
+            <span class="legend-line line-child"></span>
+            <span>子女 (蓝色指向箭头)</span>
+          </div>
+          <div class="legend-item">
+            <span class="legend-pin"></span>
+            <span>远距跨圈导航图钉</span>
           </div>
         </div>
         <div class="legend-group">
-          <div class="legend-group-title">节点颜色</div>
+          <div class="legend-group-title">人物年代/状态</div>
           <div class="legend-item">
-            <span class="legend-dot" style="background:#3a7ac0;"></span>
-            <span>男性成员 (蓝色边框)</span>
+            <span class="legend-dot dot-millennial"></span>
+            <span>2000年后出生 (亮粉)</span>
           </div>
           <div class="legend-item">
-            <span class="legend-dot" style="background:#c06080;"></span>
-            <span>女性成员 (粉色边框)</span>
+            <span class="legend-dot dot-genx"></span>
+            <span>1980-1999出生 (亮橙)</span>
+          </div>
+          <div class="legend-item">
+            <span class="legend-dot dot-boomer"></span>
+            <span>1960-1979出生 (亮黄)</span>
+          </div>
+          <div class="legend-item">
+            <span class="legend-dot dot-classic"></span>
+            <span>1940-1959出生 (绿色)</span>
+          </div>
+          <div class="legend-item">
+            <span class="legend-dot dot-old"></span>
+            <span>1940前出生 (蓝色)</span>
+          </div>
+          <div class="legend-item">
+            <span class="legend-dot dot-deceased"></span>
+            <span>已故成员 (灰色+斜纹)</span>
           </div>
           <div class="legend-item">
             <span class="legend-dot dot-active"></span>
-            <span>当前焦点人物</span>
+            <span>当前焦点人物 (橙色边框)</span>
           </div>
         </div>
       </div>
@@ -183,10 +196,9 @@
 /**
  * TreePanel visualizes lineage in two modes:
  * - reader: scrollable generation columns for daily genealogy reading
- * - flow: Hierarchical tree panorama for visual relation inspection
+ * - flow: ECharts Sunburst panorama for complex relation inspection
  */
 import { computed, nextTick, ref, watch, onMounted, onBeforeUnmount } from 'vue'
-import FlowChart from './FlowChart.vue'
 // On-demand echarts imports (tree-shaken) instead of the full bundle.
 // We only use a graph series with tooltip; decal patterns (deceased overlay)
 // are provided by the AriaComponent.
@@ -217,13 +229,7 @@ const currentCenterMemberId = ref(null)
 const centerHistoryStack = ref([])
 
 const chartRef = ref(null)
-const flowChartRef = ref(null)
 let chartInstance = null
-
-function handleFlowNodeClick(memberId) {
-  localFocusMemberId.value = Number(memberId)
-  emit('node-click', { id: Number(memberId) })
-}
 
 const authenticatedPhotos = ref(new Map())
 
@@ -1803,9 +1809,6 @@ function resetSunburstView() {
   generationLimit.value = '5'
   centerHistoryStack.value = []
   currentCenterMemberId.value = findDefaultCenterMember()
-  if (flowChartRef.value) {
-    flowChartRef.value.zoomReset()
-  }
   renderChart()
 }
 
