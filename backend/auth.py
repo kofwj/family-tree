@@ -88,6 +88,7 @@ def get_current_user(request: Request, token: Optional[str] = Depends(oauth2_sch
         user = session.exec(select(User).where(User.username == username)).first()
         if not user or not user.is_active:
             raise HTTPException(status_code=401, detail='账号不存在或已停用')
+        session.expunge(user)
         return user
 
 def require_capability(capability: str):

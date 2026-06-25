@@ -153,12 +153,27 @@ AUDIT_LOG_SQLITE_EXTRA_COLUMNS = {
     'created_at': 'TEXT',
 }
 
+_SQL_IDENTIFIER_RE = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
+_ALLOWED_COLUMN_TYPES = {'TEXT', 'INTEGER', 'REAL', 'BLOB', 'NUMERIC'}
+
+def _validate_sql_identifier(name: str) -> str:
+    if not isinstance(name, str) or not _SQL_IDENTIFIER_RE.match(name):
+        raise ValueError(f'非法的 SQL 标识符: {name!r}')
+    return name
+
 def migrate_sqlite_table_columns(table_name: str, columns: Dict[str, str]):
     if not main.DATABASE_URL.startswith('sqlite'):
         return
     db_path = sqlite_path()
     if not db_path.exists():
         return
+    # 校验标识符，防止 DDL 注入（SQLite 无法对标识符做参数化绑定）
+    _validate_sql_identifier(table_name)
+    for column, column_type in columns.items():
+        _validate_sql_identifier(column)
+        base_type = column_type.strip().split()[0].upper()
+        if base_type not in _ALLOWED_COLUMN_TYPES:
+            raise ValueError(f'不支持的列类型: {column_type!r}')
     with sqlite3.connect(db_path) as conn:
         existing = {row[1] for row in conn.execute(f'PRAGMA table_info({table_name})').fetchall()}
         for column, column_type in columns.items():
@@ -174,41 +189,6 @@ def migrate_sqlite_user_columns():
 
 def migrate_sqlite_audit_log_columns():
     migrate_sqlite_table_columns('auditlog', AUDIT_LOG_SQLITE_EXTRA_COLUMNS)
-
-ROLE_LABELS = {
-    'super_admin': '超级管理员',
-    'admin': '管理员',
-    'editor': '编辑者',
-    'viewer': '只读成员',
-}
-
-ROLE_CAPABILITIES = {
-    'super_admin': {
-        'member.view', 'member.create', 'member.edit_profile', 'member.edit_core_relation', 'member.delete', 'member.import',
-        'tree.view', 'tree.locate', 'tree.edit_structure',
-        'backup.view', 'backup.create', 'backup.download', 'backup.delete', 'backup.restore',
-        'settings.view', 'settings.edit_basic', 'settings.edit_display', 'settings.edit_security',
-        'family.view', 'family.create', 'family.edit', 'family.delete',
-        'user.view', 'user.create', 'user.edit_role', 'user.disable', 'user.reset_password',
-        'audit.view', 'quality.view', 'review.view', 'review.approve', 'source.view', 'source.manage', 'export.gedcom',
-    },
-    'admin': {
-        'member.view', 'member.create', 'member.edit_profile', 'member.edit_core_relation', 'member.delete', 'member.import',
-        'tree.view', 'tree.locate', 'tree.edit_structure',
-        'backup.view', 'backup.create', 'backup.download',
-        'settings.view', 'settings.edit_basic', 'settings.edit_display',
-        'family.view', 'family.edit',
-        'audit.view', 'quality.view', 'review.view', 'review.approve', 'source.view', 'source.manage', 'export.gedcom',
-    },
-    'editor': {
-        'member.view', 'member.create', 'member.edit_profile', 'review.create', 'source.view', 'source.manage',
-        'tree.view', 'tree.locate',
-    },
-    'viewer': {
-        'member.view', 'source.view',
-        'tree.view', 'tree.locate',
-    },
-}
 
 FIELD_VISIBILITY_TEMPLATES = {
     'public': {
@@ -530,23 +510,6 @@ def init_db():
             
         ensure_default_admin(session)
 
-def hash_password(password: str) -> str:
-    salt = os.urandom(16)
-    digest = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt, 200000)
-    return 'pbkdf2_sha256$200000$' + base64.b64encode(salt).decode('utf-8') + '$' + base64.b64encode(digest).decode('utf-8')
-
-def verify_password(password: str, password_hash: str) -> bool:
-    try:
-        scheme, iterations, salt_b64, digest_b64 = password_hash.split('$', 3)
-        if scheme != 'pbkdf2_sha256':
-            return False
-        salt = base64.b64decode(salt_b64.encode('utf-8'))
-        expected = base64.b64decode(digest_b64.encode('utf-8'))
-        actual = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt, int(iterations))
-        return hmac.compare_digest(actual, expected)
-    except Exception:
-        return False
-
 def ensure_default_family_group(session: Session):
     family = session.exec(select(FamilyGroup).where(FamilyGroup.is_primary == True)).first()
     if not family:
@@ -604,9 +567,6 @@ def ensure_default_admin(session: Session):
 def create_token(user: User) -> str:
     exp = datetime.now(timezone.utc) + timedelta(hours=24)
     return jwt.encode({'sub': user.username, 'uid': user.id, 'role': user.role, 'exp': exp}, main.JWT_SECRET, algorithm=JWT_ALG)
-
-def get_user_capabilities(user: User) -> set[str]:
-    return set(ROLE_CAPABILITIES.get(user.role, ROLE_CAPABILITIES['viewer']))
 
 def current_user_payload(user: User) -> Dict[str, Any]:
     return {
@@ -1111,13 +1071,6 @@ def require_member_in_full_scope(session: Session, user: User, member: Optional[
         raise HTTPException(status_code=403, detail='当前账号只能查看该成员基础关系，不能编辑完整档案')
     return scope_ids
 
-def require_capability(capability: str):
-    def dependency(user: User = Depends(get_current_user)) -> User:
-        if capability not in get_user_capabilities(user):
-            raise HTTPException(status_code=403, detail='当前账号无权执行此操作')
-        return user
-    return dependency
-
 def get_user_family_role(session: Session, user: User, family_id: int) -> Optional[str]:
     """Get user's role for a specific family. Returns None if no specific role assigned."""
     if user.role in ('super_admin', 'admin'):
@@ -1235,17 +1188,22 @@ def encode_spouse_ids_value(ids: list[int]) -> Optional[str]:
 
 def sync_member_spouse_links(session: Session, member_id: Optional[int], old_spouse_ids: list[int], new_spouse_ids: list[int]):
     """
-    同步配偶关系。为防止并发竞态条件，在更新前刷新数据以获取最新状态。
-    注意：SQLite 的 BEGIN IMMEDIATE 已通过 session 提供基本的事务隔离。
+    同步配偶关系（双向维护 spouse_ids）。
+
+    并发说明：本函数采用 read-modify-write 模式，其原子性依赖调用方的事务边界。
+    在单 worker 部署下是安全的；多 worker / 多进程并发修改同一配偶集合时仍可能丢失
+    更新，需要数据库级锁（如 SELECT ... FOR UPDATE 或 SQLite BEGIN IMMEDIATE）才能
+    彻底避免，当前实现未提供该保证。
     """
     if not member_id:
         return
     old_ids = {sid for sid in parse_spouse_ids_value(old_spouse_ids) if sid != member_id}
     new_ids = {sid for sid in parse_spouse_ids_value(new_spouse_ids) if sid != member_id}
 
+    # 一次性刷新缓存，确保从数据库读取最新状态
+    session.expire_all()
+
     for spouse_id in new_ids:
-        # 获取最新的配偶对象，确保读取当前数据库状态
-        session.expire_all()  # 清除缓存，强制从数据库重新读取
         spouse = session.get(Member, spouse_id)
         if not spouse:
             continue
@@ -1254,17 +1212,14 @@ def sync_member_spouse_links(session: Session, member_id: Optional[int], old_spo
             spouse_ids.append(member_id)
             spouse.spouse_ids = encode_spouse_ids_value(spouse_ids)
             session.add(spouse)
-            session.flush()  # 立即写入，减少并发窗口
 
     for spouse_id in old_ids - new_ids:
-        session.expire_all()
         spouse = session.get(Member, spouse_id)
         if not spouse:
             continue
         spouse_ids = [sid for sid in parse_spouse_ids_value(spouse.spouse_ids) if sid != member_id]
         spouse.spouse_ids = encode_spouse_ids_value(spouse_ids)
         session.add(spouse)
-        session.flush()
 
 
 def sync_spouse_marriage_details(session: Session, member: Member):
@@ -1425,15 +1380,32 @@ def to_float(v):
 
 
 def cn_count(n: int) -> str:
-    nums = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九', '十']
-    if 0 <= n <= 10:
-        return nums[n]
+    nums = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九']
+    if n < 0 or n > 9999:
+        return str(n)
+    if n <= 10:
+        return ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九', '十'][n]
     if n < 20:
+        # 11-19 口语习惯：十一、十二……
         return '十' + nums[n - 10]
-    if n < 100:
-        tens, ones = divmod(n, 10)
-        return nums[tens] + '十' + (nums[ones] if ones else '')
-    return str(n)
+    units = ['', '十', '百', '千']
+    digits = []
+    temp = n
+    while temp > 0:
+        digits.append(temp % 10)
+        temp //= 10
+    parts = []
+    prev_zero = False
+    for i in range(len(digits) - 1, -1, -1):
+        d = digits[i]
+        if d == 0:
+            prev_zero = True
+            continue
+        if prev_zero and parts:
+            parts.append('零')
+        prev_zero = False
+        parts.append(nums[d] + units[i])
+    return ''.join(parts)
 
 
 def sort_members_for_relation(members: List[Member]) -> List[Member]:
