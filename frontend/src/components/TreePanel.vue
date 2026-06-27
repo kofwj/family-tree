@@ -646,8 +646,8 @@ function computeLayout(members, centerId) {
     }
   }
 
-  // Ring intervals - increased from 160 to 200 to further reduce overlap
-  const RingWidth = 200
+  // Ring intervals - wider spacing for more breathing room
+  const RingWidth = 240
   
   // Coordinates mapping in polar: memberId -> { r, thetaDegrees }
   const coords = new Map()
@@ -658,27 +658,6 @@ function computeLayout(members, centerId) {
   // Children of root
   const rootChildren = bfsChildren.get(Number(centerId)) || []
   const rootMember = memberById.get(Number(centerId))
-  
-  // Helper to determine sector assignment in radians
-  function getSectorRange(m) {
-    if (!m) return [0, 2 * Math.PI]
-    const isParent = Number(m.id) === Number(rootMember.fatherId) || Number(m.id) === Number(rootMember.motherId)
-    if (isParent) return [Math.PI / 3, 2 * Math.PI / 3] // 60 to 120 deg (top)
-    
-    const isSpouse = Array.isArray(rootMember.spouseIds) && rootMember.spouseIds.map(Number).includes(Number(m.id))
-    if (isSpouse) return [-Math.PI / 6, Math.PI / 4] // -30 to 45 deg (right)
-    
-    const isSibling = (m.fatherId && Number(m.fatherId) === Number(rootMember.fatherId)) || 
-                      (m.motherId && Number(m.motherId) === Number(rootMember.motherId))
-    if (isSibling) return [Math.PI, 5 * Math.PI / 4] // 180 to 225 deg (left-bottom)
-    
-    const isChild = Number(m.fatherId) === Number(rootMember.id) || Number(m.motherId) === Number(rootMember.id)
-    if (isChild) return [4 * Math.PI / 3, 11 * Math.PI / 6] // 240 to 330 deg (bottom)
-    
-    // Others go into the free upper-left gap (120-180 deg) so they don't
-    // collide with the spouse (right) or parent (top) sectors.
-    return [2 * Math.PI / 3, Math.PI]
-  }
 
   function assignAngles(nodeId, thetaMin, thetaMax, r) {
     const theta = (thetaMin + thetaMax) / 2
@@ -699,12 +678,12 @@ function computeLayout(members, centerId) {
     } else if (ringLevel === 1) {
       nodeDiameter = 36
     } else {
-      nodeDiameter = Math.max(20, 36 - (ringLevel - 1) * 4)
+      nodeDiameter = Math.max(16, 36 - (ringLevel - 1) * 4)
     }
 
     // Arc length = radius × angle, so angle = arc_length / radius
-    // Add 25% padding for visual breathing room
-    const minAngleSeparation = (nodeDiameter * 1.25) / (r + 1)
+    // Add 50% padding for visual breathing room
+    const minAngleSeparation = (nodeDiameter * 1.5) / (r + 1)
     const minSpanNeeded = minAngleSeparation * children.length
 
     // If not enough space, nodes will be distributed evenly in available span
@@ -729,9 +708,9 @@ function computeLayout(members, centerId) {
       return birthA.localeCompare(birthB)
     })
 
-    // Assign angles clockwise from thetaMin (oldest child first, proceeding clockwise)
-    // In polar coordinates, decreasing angle = clockwise, so we subtract step each time
-    let currentTheta = thetaMin
+    // Assign angles CLOCKWISE (oldest child first). Since y = -r*sin(theta),
+    // decreasing theta is clockwise on screen, so start at thetaMax and subtract.
+    let currentTheta = thetaMax - step
     for (let i = 0; i < childrenMembers.length; i++) {
       const child = childrenMembers[i]
 
@@ -765,11 +744,11 @@ function computeLayout(members, centerId) {
         const twin2 = childrenMembers[i]
         assignAngles(twin2.id, currentTheta, currentTheta + step, childRadius)
 
-        currentTheta += step
+        currentTheta -= step
       } else {
         // Single child: assign the current angle and recurse
         assignAngles(child.id, currentTheta, currentTheta + step, childRadius)
-        currentTheta += step
+        currentTheta -= step
       }
     }
   }
@@ -788,18 +767,19 @@ function computeLayout(members, centerId) {
     } else if (ringLevel === 1) {
       nodeDiameter = 36
     } else {
-      nodeDiameter = Math.max(20, 36 - (ringLevel - 1) * 4)
+      nodeDiameter = Math.max(16, 36 - (ringLevel - 1) * 4)
     }
 
-    // Arc length = radius × angle, add 25% padding
-    const minAngleSeparation = (nodeDiameter * 1.25) / (r + 1)
+    // Arc length = radius × angle, add 50% padding
+    const minAngleSeparation = (nodeDiameter * 1.5) / (r + 1)
     const minSpanNeeded = minAngleSeparation * nodesList.length
 
     // Distribute nodes evenly in available span (stay within sector boundaries)
     const step = span / nodesList.length
 
-    // Assign angles clockwise from thetaMin
-    let currentTheta = thetaMin
+    // Assign angles CLOCKWISE: since y = -r*sin(theta), decreasing theta is
+    // clockwise on screen. Start at thetaMax (oldest first) and decrement.
+    let currentTheta = thetaMax - step
     for (let i = 0; i < nodesList.length; i++) {
       const member = nodesList[i]
 
@@ -823,10 +803,10 @@ function computeLayout(members, centerId) {
         assignAngles(twin2.id, currentTheta, currentTheta + step, r)
 
         i++
-        currentTheta += step
+        currentTheta -= step
       } else {
         assignAngles(member.id, currentTheta, currentTheta + step, r)
-        currentTheta += step
+        currentTheta -= step
       }
     }
   }
@@ -906,15 +886,35 @@ function computeLayout(members, centerId) {
     return birthA.localeCompare(birthB)
   })
 
-  // Partition sectors
-  // Spouses stay very close to center (minimal separation) to show they are in the same generation
-  // Use a small radius (1/4 node size) to prevent exact overlap while appearing in the same ring
-  const spouseRadius = 20 // Very small radius, just enough to separate from center visually
-  partitionSector(parentsList, Math.PI / 3, 2 * Math.PI / 3, RingWidth)
-  partitionSector(spousesList, -Math.PI / 6, Math.PI / 4, spouseRadius)
-  partitionSector(siblingsList, Math.PI, 5 * Math.PI / 4, RingWidth)
-  partitionSector(childrenList, 4 * Math.PI / 3, 11 * Math.PI / 6, RingWidth)
-  partitionSector(othersList, 2 * Math.PI / 3, Math.PI, RingWidth)
+  // Partition sectors dynamically: each relation group gets an arc proportional
+  // to its member count (with a guaranteed minimum), so the full 360° is used
+  // and dense groups (e.g. many children) get more breathing room.
+  //
+  // Spouses sit on a slightly larger radius (still the innermost ring) so multiple
+  // partners spread out clockwise in partnership order without overlapping.
+  const spouseRadius = 60 + spousesList.length * 18
+
+  const sectorGroups = [
+    { list: parentsList, r: RingWidth },
+    { list: spousesList, r: spouseRadius },
+    { list: childrenList, r: RingWidth },
+    { list: siblingsList, r: RingWidth },
+    { list: othersList, r: RingWidth },
+  ].filter(g => g.list.length > 0)
+
+  const totalNeighbors = sectorGroups.reduce((sum, g) => sum + g.list.length, 0)
+  if (totalNeighbors > 0) {
+    const MIN_ARC = Math.PI / 6 // 30° guaranteed per group
+    const flexible = Math.max(0, 2 * Math.PI - MIN_ARC * sectorGroups.length)
+    // Start parents at the top (90°) and walk clockwise (decreasing angle)
+    let cursor = Math.PI / 2
+    for (const g of sectorGroups) {
+      const arc = MIN_ARC + flexible * (g.list.length / totalNeighbors)
+      // partitionSector expects [thetaMin, thetaMax] with thetaMin < thetaMax
+      partitionSector(g.list, cursor - arc, cursor, g.r)
+      cursor -= arc
+    }
+  }
 
   // Formulate ECharts nodes and links
   const echartsNodes = []
@@ -1042,6 +1042,22 @@ function computeLayout(members, centerId) {
       fontSize = Math.max(7, 9 - (ringLevel - 1) * 0.5)
     }
 
+    // Build a multi-line label: name + relation-to-center + occupation/location.
+    // Outer rings (small nodes) show name only to avoid clutter.
+    const relationText = relationToCenter.get(mid) || ''
+    const infoText = [m.occupation, m.residence || m.birthPlace].filter(Boolean).join(' · ')
+    const showDetail = ringLevel < 3 && (mid === centerId || isActive || ringLevel <= 2)
+    const richLabel = {
+      name: { fontSize, fontWeight: mid === centerId ? 'bold' : 'bold', color: '#ffffff', lineHeight: fontSize + 4, textBorderColor: 'rgba(0,0,0,0.8)', textBorderWidth: 2.5 },
+      relation: { fontSize: Math.max(7, fontSize - 2), color: '#90caf9', lineHeight: fontSize + 1, textBorderColor: 'rgba(0,0,0,0.7)', textBorderWidth: 2 },
+      info: { fontSize: Math.max(6, fontSize - 3), color: '#b0bec5', lineHeight: fontSize, textBorderColor: 'rgba(0,0,0,0.7)', textBorderWidth: 2 },
+    }
+    const labelFormatter = showDetail
+      ? `{name|${m.name}}` +
+        (relationText ? `\n{relation|${relationText}}` : '') +
+        (infoText ? `\n{info|${infoText}}` : '')
+      : m.name
+
     if (photoUrl) {
       // 1. Push border ring node (bottom layer)
       echartsNodes.push({
@@ -1071,7 +1087,8 @@ function computeLayout(members, centerId) {
         symbolSize: nodeSize,
         label: {
           show: true,
-          formatter: m.name,
+          formatter: labelFormatter,
+          rich: richLabel,
           position: labelPosition,
           distance: 6,
           color: '#ffffff',
@@ -1131,7 +1148,8 @@ function computeLayout(members, centerId) {
         },
         label: {
           show: true,
-          formatter: m.name,
+          formatter: labelFormatter,
+          rich: richLabel,
           position: labelPosition,
           distance: 6,
           color: '#ffffff',
@@ -1167,19 +1185,25 @@ function computeLayout(members, centerId) {
         if (diff > 180) diff -= 360
         if (diff < -180) diff += 360
 
-        // More elegant curve for spouse connection (like the example)
-        // Larger curvature for closer spouses, smoother arc
+        // Spouse arc: compute curveness so the bezier approximates a true
+        // circular arc following the ring the couple sits on. For a circular
+        // segment, the ideal control-point offset ratio is (4/3)·sagitta/chord.
         const angularDistance = Math.abs(diff)
-        let spouseCurveness = -Math.sign(diff) * Math.min(0.3, 0.15 + angularDistance / 600)
+        const rAvg = ((c1.r + c2.r) / 2) || RingWidth
+        const halfAngleRad = (angularDistance * Math.PI / 180) / 2
+        const chord = 2 * rAvg * Math.sin(halfAngleRad)
+        const sagitta = rAvg * (1 - Math.cos(halfAngleRad))
+        const curveFactor = chord > 0 ? (4 * sagitta) / (3 * chord) : 0.2
+        let spouseCurveness = -Math.sign(diff) * Math.min(0.5, Math.max(0.12, curveFactor))
 
         echartsLinks.push({
           source: String(mid),
           target: String(sid),
           lineStyle: {
-            color: '#e91e63', // More vibrant red-pink (like example)
-            width: 2.5, // Slightly thinner for elegance
+            color: '#e91e63', // Vibrant red-pink for spouse connection
+            width: 3.0, // Thickest line — top of the visual hierarchy
             curveness: spouseCurveness,
-            opacity: 0.9
+            opacity: 0.92
           }
         })
 
@@ -1235,6 +1259,7 @@ function computeLayout(members, centerId) {
               const xShortcut = shortcutR * Math.cos(shortcutThetaRad)
               const yShortcut = -shortcutR * Math.sin(shortcutThetaRad)
 
+              // Start marker (near the parents) — labeled with the destination child
               echartsNodes.push({
                 id: shortcutNodeId,
                 x: xShortcut,
@@ -1244,7 +1269,7 @@ function computeLayout(members, centerId) {
                 itemStyle: { color: '#4d7cff' },
                 label: {
                   show: true,
-                  formatter: `→ 跳转至 ${child.name}`,
+                  formatter: `→ ${child.name}`,
                   position: 'right',
                   color: '#4d7cff',
                   fontSize: 10,
@@ -1258,7 +1283,43 @@ function computeLayout(members, centerId) {
                 target: shortcutNodeId,
                 lineStyle: {
                   color: '#4d7cff',
-                  width: 1.5,
+                  width: 1.0,
+                  opacity: 0.7,
+                  type: 'dashed'
+                }
+              })
+
+              // End marker (near the child) — labeled with the source parents
+              const parentLabel = [m.name, (memberById.get(Number(sid)) || {}).name].filter(Boolean).join(' & ')
+              const endPinId = `shortcut-end-${coupleKey}-${childId}`
+              const endR = Math.max(0, cChild.r - 28)
+              const endThetaRad = cChild.thetaDegrees * Math.PI / 180
+              const xEnd = endR * Math.cos(endThetaRad)
+              const yEnd = -endR * Math.sin(endThetaRad)
+              echartsNodes.push({
+                id: endPinId,
+                x: xEnd,
+                y: yEnd,
+                symbol: 'pin',
+                symbolSize: 10,
+                itemStyle: { color: '#4d7cff' },
+                label: {
+                  show: true,
+                  formatter: `← ${parentLabel}`,
+                  position: 'left',
+                  color: '#4d7cff',
+                  fontSize: 10,
+                  textBorderColor: 'rgba(0,0,0,0.8)',
+                  textBorderWidth: 2
+                }
+              })
+              echartsLinks.push({
+                source: endPinId,
+                target: String(childId),
+                lineStyle: {
+                  color: '#4d7cff',
+                  width: 1.0,
+                  opacity: 0.7,
                   type: 'dashed'
                 }
               })
@@ -1273,13 +1334,13 @@ function computeLayout(members, centerId) {
                 source: parentSourceId,
                 target: String(closeChildren[0].childId),
                 lineStyle: {
-                  color: '#2196f3', // Brighter blue (like example)
-                  width: 2,
-                  curveness: 0.08, // Gentle curve
+                  color: '#64b5f6', // Soft light-blue for child link
+                  width: 1.6,
+                  curveness: 0.18, // Smoother, more pronounced flow
                   opacity: 0.85
                 },
                 symbol: ['none', 'arrow'],
-                symbolSize: [0, 8] // Slightly larger arrow
+                symbolSize: [0, 7]
               })
             } else {
               // Group children by position to detect twins (same angle)
@@ -1343,9 +1404,10 @@ function computeLayout(members, centerId) {
                 source: parentSourceId,
                 target: ccNodeId,
                 lineStyle: {
-                  color: '#2196f3', // Brighter blue
-                  width: 2,
-                  opacity: 0.85
+                  color: '#64b5f6', // Soft light-blue trunk
+                  width: 1.8,
+                  curveness: 0.05, // Slight curve so the trunk isn't a hard straight
+                  opacity: 0.8
                 }
               })
 
@@ -1357,19 +1419,19 @@ function computeLayout(members, centerId) {
                   let diff = cc.cChild.thetaDegrees - avgTheta
                   if (diff > 180) diff -= 360
                   if (diff < -180) diff += 360
-                  const curveness = Math.sin(diff * Math.PI / 180) * 0.15 // Gentler curve
+                  const curveness = Math.sin(diff * Math.PI / 180) * 0.25 // Smoother fan-out
 
                   echartsLinks.push({
                     source: ccNodeId,
                     target: String(cc.childId),
                     lineStyle: {
-                      color: '#2196f3', // Brighter blue
-                      width: 2,
+                      color: '#64b5f6', // Soft light-blue
+                      width: 1.5,
                       curveness: curveness,
                       opacity: 0.85
                     },
                     symbol: ['none', 'arrow'],
-                    symbolSize: [0, 8] // Larger arrow
+                    symbolSize: [0, 7]
                   })
                 } else {
                   // Twins/multiples: create a split point at their shared location
@@ -1396,14 +1458,14 @@ function computeLayout(members, centerId) {
                   let diff = twinTheta - avgTheta
                   if (diff > 180) diff -= 360
                   if (diff < -180) diff += 360
-                  const curveness = Math.sin(diff * Math.PI / 180) * 0.15 // Gentler curve
+                  const curveness = Math.sin(diff * Math.PI / 180) * 0.25 // Smoother fan-out
 
                   echartsLinks.push({
                     source: ccNodeId,
                     target: splitNodeId,
                     lineStyle: {
-                      color: '#2196f3', // Brighter blue
-                      width: 2,
+                      color: '#64b5f6', // Soft light-blue
+                      width: 1.6,
                       curveness: curveness,
                       opacity: 0.85
                     }
@@ -1433,12 +1495,12 @@ function computeLayout(members, centerId) {
                       source: splitNodeId,
                       target: virtualTargetId,
                       lineStyle: {
-                        color: '#2196f3', // Brighter blue
-                        width: 2,
+                        color: '#64b5f6', // Soft light-blue
+                        width: 1.5,
                         opacity: 0.85
                       },
                       symbol: ['none', 'arrow'],
-                      symbolSize: [0, 8] // Larger arrow
+                      symbolSize: [0, 7]
                     })
 
                     // Link virtual target to actual twin
@@ -1488,6 +1550,7 @@ function computeLayout(members, centerId) {
           const xShortcut = shortcutR * Math.cos(shortcutThetaRad)
           const yShortcut = -shortcutR * Math.sin(shortcutThetaRad)
 
+          // Start marker (near the parent) — labeled with the destination child
           echartsNodes.push({
             id: shortcutNodeId,
             x: xShortcut,
@@ -1497,7 +1560,7 @@ function computeLayout(members, centerId) {
             itemStyle: { color: '#4d7cff' },
             label: {
               show: true,
-              formatter: `→ 跳转至 ${child.name}`,
+              formatter: `→ ${child.name}`,
               position: 'right',
               color: '#4d7cff',
               fontSize: 10,
@@ -1511,7 +1574,42 @@ function computeLayout(members, centerId) {
             target: shortcutNodeId,
             lineStyle: {
               color: '#4d7cff',
-              width: 1.5,
+              width: 1.0,
+              opacity: 0.7,
+              type: 'dashed'
+            }
+          })
+
+          // End marker (near the child) — labeled with the source parent
+          const endPinId = `shortcut-single-end-${mid}-${childId}`
+          const endR = Math.max(0, cChild.r - 28)
+          const endThetaRad = cChild.thetaDegrees * Math.PI / 180
+          const xEnd = endR * Math.cos(endThetaRad)
+          const yEnd = -endR * Math.sin(endThetaRad)
+          echartsNodes.push({
+            id: endPinId,
+            x: xEnd,
+            y: yEnd,
+            symbol: 'pin',
+            symbolSize: 10,
+            itemStyle: { color: '#4d7cff' },
+            label: {
+              show: true,
+              formatter: `← ${m.name}`,
+              position: 'left',
+              color: '#4d7cff',
+              fontSize: 10,
+              textBorderColor: 'rgba(0,0,0,0.8)',
+              textBorderWidth: 2
+            }
+          })
+          echartsLinks.push({
+            source: endPinId,
+            target: String(childId),
+            lineStyle: {
+              color: '#4d7cff',
+              width: 1.0,
+              opacity: 0.7,
               type: 'dashed'
             }
           })
@@ -1526,12 +1624,12 @@ function computeLayout(members, centerId) {
             source: String(mid),
             target: String(closeSingleChildren[0].childId),
             lineStyle: {
-              color: '#4d7cff',
-              width: 2,
-              curveness: 0.05
+              color: '#64b5f6', // Soft light-blue for child link
+              width: 1.6,
+              curveness: 0.18
             },
             symbol: ['none', 'arrow'],
-            symbolSize: [0, 6]
+            symbolSize: [0, 7]
           })
         } else {
           // Use vector average for avgTheta to avoid wrap-around issues
@@ -1561,8 +1659,10 @@ function computeLayout(members, centerId) {
             source: String(mid),
             target: ccNodeId,
             lineStyle: {
-              color: '#4d7cff',
-              width: 2
+              color: '#64b5f6',
+              width: 1.8,
+              curveness: 0.05,
+              opacity: 0.8
             }
           })
 
@@ -1570,14 +1670,14 @@ function computeLayout(members, centerId) {
             let diff = cc.cChild.thetaDegrees - avgTheta
             if (diff > 180) diff -= 360
             if (diff < -180) diff += 360
-            const curveness = Math.sin(diff * Math.PI / 180) * 0.2
+            const curveness = Math.sin(diff * Math.PI / 180) * 0.25
 
             echartsLinks.push({
               source: ccNodeId,
               target: String(cc.childId),
               lineStyle: {
-                color: '#4d7cff',
-                width: 2,
+                color: '#64b5f6',
+                width: 1.5,
                 curveness: curveness
               },
               symbol: ['none', 'arrow'],

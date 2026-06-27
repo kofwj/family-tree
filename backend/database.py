@@ -7,7 +7,7 @@ from sqlmodel import create_engine, Session
 
 DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///./data/family.db')
 RUNNING_IN_CONTAINER = Path('/app').exists()
-INSECURE_JWT_SECRETS = {'', 'change-me-in-production', 'please-change-this-secret', 'dev-only-family-tree-secret'}
+INSECURE_JWT_SECRETS = {'', 'change-me-in-production', 'please-change-this-secret', 'dev-only-family-tree-secret', 'family-tree-local-secret'}
 
 # SECURE_COOKIE & IS_TESTING
 SECURE_COOKIE = os.getenv('SECURE_COOKIE', 'false').lower() == 'true'
