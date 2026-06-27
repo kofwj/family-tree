@@ -1,5 +1,47 @@
 # 更新日志
 
+## 2026-06-25
+
+### 代码审查修复与全景关系图视觉优化
+
+#### Bug 修复与安全加固（10 项）
+
+- **消除循环导入隐患**：删除 `helpers.py` 中重复定义的 `ROLE_LABELS`、`ROLE_CAPABILITIES`、`hash_password`、`verify_password`、`get_user_capabilities`、`require_capability`，这些符号已从 `backend.auth` 导入，重复定义会造成命名遮蔽。现统一以 `auth.py` 为唯一来源。
+- **家谱树构建性能优化**：`GET /families/{id}/tree` 中爬取后代与配偶的逻辑由 O(n²) 的 `while added` 全表反复扫描，改为预建父子邻接索引 + BFS 队列，复杂度降至 O(n)，并消除了 `all_members` 列表中的重复对象。
+- **显式导入 datetime**：`main.py` 的 `/health` 端点不再依赖 `from backend.helpers import *` 隐式带入 `datetime`/`timezone`，改为显式导入，避免 helpers 变动时静默崩溃。
+- **get_current_user 返回游离对象**：在 Session 关闭前调用 `session.expunge(user)`，明确返回一个与会话分离的 User 实例，避免将来添加 ORM 关系字段时触发 detached 懒加载错误。
+- **中文数字转换支持大数**：`cn_count()` 重写，正确支持 0–9999 的中文数字（如 105→一百零五、1205→一千二百零五），超出范围回退为阿拉伯数字。
+- **JWT 弱密钥黑名单**：将 `family-tree-local-secret` 加入 `INSECURE_JWT_SECRETS`，非测试环境使用该弱密钥启动将被拒绝。
+- **地图瓦片代理加固**：`GET /map/tile/{z}/{x}/{y}.png` 增加登录认证（与 `/map/search`、`/map/reverse` 一致），并对 `z`(0–20)、`x`/`y`(0 ≤ v < 2^z)、`style`(白名单)、`source`(白名单) 做边界校验，越界返回透明占位图，关闭未认证的开放代理。
+- **SQL DDL 标识符白名单**：`migrate_sqlite_table_columns()` 对表名、列名做正则白名单校验（`^[A-Za-z_][A-Za-z0-9_]*$`），列类型基类型限定在 TEXT/INTEGER/REAL/BLOB/NUMERIC，杜绝 DDL 注入隐患。
+- **移除冗余依赖**：从 `requirements.txt` 删除从未被调用的 `passlib[bcrypt]`（密码哈希实际使用手写 PBKDF2）。
+- **配偶同步竞态修正**：`sync_member_spouse_links()` 移除循环内每次迭代的 `session.expire_all()`/`session.flush()`（无法提供原子性，仅增加开销），改为函数开始时统一刷新一次；并修正 docstring，如实说明单 worker 安全、多 worker 仍需数据库级锁。
+
+#### 全景关系图（家族圈图）视觉优化（9 项）
+
+参照 Family Circles Diagram 设计规范，对 `TreePanel.vue` 的极坐标全景图做以下优化：
+
+- **节点多行标签**：节点直接显示姓名 + 与焦点人物的关系 + 职业·地点（rich text 三行），外圈小节点仅显示姓名以避免拥挤。
+- **子女严格顺时针出生序**：修正角度分配方向，子女按出生顺序在屏幕上顺时针排列。
+- **多配偶间距优化**：配偶半径按人数动态扩展（`60 + 配偶数×18`），多个配偶按结婚顺序顺时针分散，不再重叠。
+- **动态扇区分配**：删除硬编码的固定扇区（父母上/配偶右/子女下…），改为按各类亲属人数比例分配 360° 空间（每组保底 30°），密集分组自动获得更多空间。
+- **远距连接双端标记**：跨圈远距连线在起点（"→ 子女名"）和终点（"← 父母名"）各放置一个图钉标记，双端均可识别连接对象。
+- **配偶弧线贴合环形**：配偶红线 curveness 用圆弧公式 `(4/3)·sagitta/chord` 计算，使贝塞尔曲线逼近真正的同心圆弧。
+- **子女连线更流畅**：提升子女蓝线的 curveness，主干也加微曲率消除折角。
+- **线条粗细层次**：配偶红线(3.0) > 子女主干(1.8) > 子女箭头(1.5) > 远距虚线(1.0)；子女线颜色由 `#2196f3` 调整为更柔和的 `#64b5f6`，与配偶红线形成清晰对比。
+- **节点呼吸感**：环间距 `RingWidth` 200→240，节点角度间距留白 25%→50%，外圈节点最小尺寸 20→16px。
+
+#### 测试与验证
+
+- 后端 39 个回归测试全部通过（`pytest -q`）。
+- 前端生产构建通过（`vite build`，1791 模块）。
+- 清理死代码：删除 `TreePanel.vue` 中从未被调用的 `getSectorRange()` 函数。
+
+#### 用户须知
+
+- **JWT 密钥变更**：本地 `.env` 的 `JWT_SECRET` 已更换为强随机值，现有登录会话将失效，需要重新登录。
+- **配偶同步并发说明**：单 worker（默认）部署下配偶关系同步是安全的；若使用多 worker / 多进程部署，并发修改同一配偶集合仍可能丢失更新，需引入数据库级锁。
+
 ## 2026-06-24
 
 ### 安全加固与数据完整性改进
