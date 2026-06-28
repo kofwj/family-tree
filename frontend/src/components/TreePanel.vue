@@ -659,74 +659,91 @@ function computeLayout(members, centerId) {
   const rootChildren = bfsChildren.get(Number(centerId)) || []
   const rootMember = memberById.get(Number(centerId))
 
-  function assignAngles(nodeId, thetaMin, thetaMax, r) {
+  // Radial tree layout weight: each node's angular width is proportional to the
+  // number of leaves in its subtree. This prevents large branches from being
+  // squeezed into a narrow sector (which caused node/avatar overlap). Spouses
+  // sit on the same ring as their partner and do NOT consume outward angular
+  // space, so they are excluded from the leaf count.
+  const leafCount = new Map()
+  function isSpouseChild(parentId, childId) {
+    const parentM = memberById.get(Number(parentId))
+    return !!(parentM && Array.isArray(parentM.spouseIds) && parentM.spouseIds.map(Number).includes(Number(childId)))
+  }
+  function computeLeafCount(nodeId) {
+    const nid = Number(nodeId)
+    if (leafCount.has(nid)) return leafCount.get(nid)
+    const children = (bfsChildren.get(nid) || []).filter(cid => !isSpouseChild(nid, cid))
+    if (children.length === 0) { leafCount.set(nid, 1); return 1 }
+    let sum = 0
+    for (const c of children) sum += computeLeafCount(c)
+    const total = Math.max(1, sum)
+    leafCount.set(nid, total)
+    return total
+  }
+  computeLeafCount(centerId)
+
+  function assignAngles(nodeId, thetaMin, thetaMax, r, level = 1) {
     const theta = (thetaMin + thetaMax) / 2
     const thetaDegrees = theta * 180 / Math.PI
-    coords.set(Number(nodeId), { r, thetaDegrees })
+    coords.set(Number(nodeId), { r, thetaDegrees, level })
 
     const children = bfsChildren.get(Number(nodeId)) || []
     if (children.length === 0) return
 
     const span = thetaMax - thetaMin
-
-    // Calculate minimum angle needed per node to avoid overlap
-    // Based on actual node border size at this ring level
-    const ringLevel = Math.floor(r / RingWidth)
-    let nodeDiameter
-    if (ringLevel === 0) {
-      nodeDiameter = 48
-    } else if (ringLevel === 1) {
-      nodeDiameter = 36
-    } else {
-      nodeDiameter = Math.max(16, 36 - (ringLevel - 1) * 4)
-    }
-
-    // Arc length = radius × angle, so angle = arc_length / radius
-    // Add 50% padding for visual breathing room
-    const minAngleSeparation = (nodeDiameter * 1.5) / (r + 1)
-    const minSpanNeeded = minAngleSeparation * children.length
-
-    // If not enough space, nodes will be distributed evenly in available span
-    // This may cause slight overlap, but better than completely breaking out of sector
-    const step = span >= minSpanNeeded ? (span / children.length) : (span / children.length)
+    const ringLevel = level
+    // Outer rings get slightly larger gaps so the bigger circumference is used.
+    const nextRingGap = RingWidth + ringLevel * 20
 
     const childrenMembers = children.map(cid => memberById.get(cid)).filter(Boolean)
 
     // Sort by rank in family (排行) first, then by birth date as fallback
     childrenMembers.sort((a, b) => {
-      // First try to sort by rankInFamily
       const rankA = a.rankInFamily || a.rank_in_family || 0
       const rankB = b.rankInFamily || b.rank_in_family || 0
-
       if (rankA && rankB && rankA !== rankB) {
         return rankA - rankB
       }
-
-      // Fallback to birth date if ranks are not available or equal
       const birthA = a.birthDate || a.birthDateText || ''
       const birthB = b.birthDate || b.birthDateText || ''
       return birthA.localeCompare(birthB)
     })
 
-    // Assign angles CLOCKWISE (oldest child first). Since y = -r*sin(theta),
-    // decreasing theta is clockwise on screen, so start at thetaMax and subtract.
-    let currentTheta = thetaMax - step
-    for (let i = 0; i < childrenMembers.length; i++) {
-      const child = childrenMembers[i]
+    // Separate spouses (sit on same ring, no outward angular consumption) from
+    // real descendants (which get weighted angular wedges).
+    const spouseChildren = []
+    const realChildren = []
+    for (const child of childrenMembers) {
+      if (isSpouseChild(nodeId, child.id)) spouseChildren.push(child)
+      else realChildren.push(child)
+    }
 
-      // Check if this child is a spouse (should stay very close to same ring)
-      const parentMember = memberById.get(Number(nodeId))
-      const isSpouse = parentMember && Array.isArray(parentMember.spouseIds) &&
-                       parentMember.spouseIds.map(Number).includes(Number(child.id))
+    // Place spouses just offset from the parent's angle, on a near-same ring.
+    spouseChildren.forEach((sp, idx) => {
+      const offset = ((idx + 1) * 7) * Math.PI / 180 // 7° per extra spouse
+      assignAngles(sp.id, theta - offset, theta + offset, r + 40, level)
+    })
 
-      // Spouses use small offset (30px) to stay visually in same ring but avoid exact overlap
-      // Others use full ring width (next ring)
-      const childRadius = isSpouse ? (r + 30) : (r + RingWidth)
+    if (realChildren.length === 0) return
 
-      // Check for twins/multiples: same birth date AND same parents
+    // Weighted angular distribution: each child's wedge is proportional to the
+    // number of leaves in its subtree, so dense branches get more room and nodes
+    // never overlap. Walk CLOCKWISE (decreasing theta) from thetaMax.
+    const weights = realChildren.map(c => leafCount.get(Number(c.id)) || 1)
+    const totalWeight = weights.reduce((a, b) => a + b, 0) || 1
+
+    let cursor = thetaMax
+    for (let i = 0; i < realChildren.length; i++) {
+      const child = realChildren[i]
+      const childSpan = span * (weights[i] / totalWeight)
+      const childThetaMax = cursor
+      const childThetaMin = cursor - childSpan
+      const childRadius = r + nextRingGap
+
+      // Twins/multiples: same birth date AND same parents → share the same wedge
       let isTwin = false
-      if (!isSpouse && i < childrenMembers.length - 1) {
-        const nextChild = childrenMembers[i + 1]
+      if (i < realChildren.length - 1) {
+        const nextChild = realChildren[i + 1]
         const date1 = child.birthDate || child.birthDateText
         const date2 = nextChild.birthDate || nextChild.birthDateText
         if (date1 && date1 === date2 && child.fatherId && Number(child.fatherId) === Number(nextChild.fatherId) && child.motherId && Number(child.motherId) === Number(nextChild.motherId)) {
@@ -735,20 +752,14 @@ function computeLayout(members, centerId) {
       }
 
       if (isTwin) {
-        // For twins, place them at the same angle (they'll be at the same point)
-        // The arrow will split to both from this point
-        assignAngles(child.id, currentTheta, currentTheta + step, childRadius)
-
-        // Process the twin sibling
+        assignAngles(child.id, childThetaMin, childThetaMax, childRadius, level + 1)
         i++
-        const twin2 = childrenMembers[i]
-        assignAngles(twin2.id, currentTheta, currentTheta + step, childRadius)
-
-        currentTheta -= step
+        const twin2 = realChildren[i]
+        assignAngles(twin2.id, childThetaMin, childThetaMax, childRadius, level + 1)
+        cursor -= childSpan
       } else {
-        // Single child: assign the current angle and recurse
-        assignAngles(child.id, currentTheta, currentTheta + step, childRadius)
-        currentTheta -= step
+        assignAngles(child.id, childThetaMin, childThetaMax, childRadius, level + 1)
+        cursor -= childSpan
       }
     }
   }
@@ -758,30 +769,18 @@ function computeLayout(members, centerId) {
 
     const span = thetaMax - thetaMin
 
-    // Calculate minimum angle needed per node to avoid overlap
-    // Based on actual node border size at Ring 1
-    const ringLevel = Math.floor(r / RingWidth)
-    let nodeDiameter
-    if (ringLevel === 0) {
-      nodeDiameter = 48
-    } else if (ringLevel === 1) {
-      nodeDiameter = 36
-    } else {
-      nodeDiameter = Math.max(16, 36 - (ringLevel - 1) * 4)
-    }
+    // Weighted distribution: each member's wedge is proportional to its subtree
+    // leaf count, matching the recursive radial layout. Walk CLOCKWISE
+    // (decreasing theta) from thetaMax so birth order reads clockwise.
+    const weights = nodesList.map(m => leafCount.get(Number(m.id)) || 1)
+    const totalWeight = weights.reduce((a, b) => a + b, 0) || 1
 
-    // Arc length = radius × angle, add 50% padding
-    const minAngleSeparation = (nodeDiameter * 1.5) / (r + 1)
-    const minSpanNeeded = minAngleSeparation * nodesList.length
-
-    // Distribute nodes evenly in available span (stay within sector boundaries)
-    const step = span / nodesList.length
-
-    // Assign angles CLOCKWISE: since y = -r*sin(theta), decreasing theta is
-    // clockwise on screen. Start at thetaMax (oldest first) and decrement.
-    let currentTheta = thetaMax - step
+    let cursor = thetaMax
     for (let i = 0; i < nodesList.length; i++) {
       const member = nodesList[i]
+      const memberSpan = span * (weights[i] / totalWeight)
+      const mThetaMax = cursor
+      const mThetaMin = cursor - memberSpan
 
       // Check for twins/multiples
       let isTwin = false
@@ -795,18 +794,13 @@ function computeLayout(members, centerId) {
       }
 
       if (isTwin) {
-        // Place twins at the same angle
-        const twin1 = member
-        const twin2 = nodesList[i + 1]
-
-        assignAngles(twin1.id, currentTheta, currentTheta + step, r)
-        assignAngles(twin2.id, currentTheta, currentTheta + step, r)
-
+        assignAngles(member.id, mThetaMin, mThetaMax, r)
         i++
-        currentTheta -= step
+        assignAngles(nodesList[i].id, mThetaMin, mThetaMax, r)
+        cursor -= memberSpan
       } else {
-        assignAngles(member.id, currentTheta, currentTheta + step, r)
-        currentTheta -= step
+        assignAngles(member.id, mThetaMin, mThetaMax, r)
+        cursor -= memberSpan
       }
     }
   }
@@ -887,8 +881,9 @@ function computeLayout(members, centerId) {
   })
 
   // Partition sectors dynamically: each relation group gets an arc proportional
-  // to its member count (with a guaranteed minimum), so the full 360° is used
-  // and dense groups (e.g. many children) get more breathing room.
+  // to its total SUBTREE SIZE (leaf count), not just its member count, so a
+  // branch with many descendants (e.g. children with large families) gets a
+  // proportionally wider sector and its nodes never overlap.
   //
   // Spouses sit on a slightly larger radius (still the innermost ring) so multiple
   // partners spread out clockwise in partnership order without overlapping.
@@ -902,14 +897,15 @@ function computeLayout(members, centerId) {
     { list: othersList, r: RingWidth },
   ].filter(g => g.list.length > 0)
 
-  const totalNeighbors = sectorGroups.reduce((sum, g) => sum + g.list.length, 0)
-  if (totalNeighbors > 0) {
+  const groupWeight = (list) => list.reduce((s, m) => s + (leafCount.get(Number(m.id)) || 1), 0)
+  const totalWeight = sectorGroups.reduce((sum, g) => sum + groupWeight(g.list), 0)
+  if (totalWeight > 0) {
     const MIN_ARC = Math.PI / 6 // 30° guaranteed per group
     const flexible = Math.max(0, 2 * Math.PI - MIN_ARC * sectorGroups.length)
     // Start parents at the top (90°) and walk clockwise (decreasing angle)
     let cursor = Math.PI / 2
     for (const g of sectorGroups) {
-      const arc = MIN_ARC + flexible * (g.list.length / totalNeighbors)
+      const arc = MIN_ARC + flexible * (groupWeight(g.list) / totalWeight)
       // partitionSector expects [thetaMin, thetaMax] with thetaMin < thetaMax
       partitionSector(g.list, cursor - arc, cursor, g.r)
       cursor -= arc
@@ -926,8 +922,8 @@ function computeLayout(members, centerId) {
     const mid = Number(m.id)
     if (!coords.has(mid)) continue
     
-    const { r, thetaDegrees } = coords.get(mid)
-    const dist = r / RingWidth
+    const { r, thetaDegrees, level: coordLevel } = coords.get(mid)
+    const dist = coordLevel != null ? coordLevel : Math.round(r / RingWidth)
     if (dist > maxDistance) maxDistance = dist
     const isActive = mid === Number(currentCenterMemberId.value)
     
@@ -1018,8 +1014,8 @@ function computeLayout(members, centerId) {
     }
 
     // Dynamic node size based on distance from center
-    // Center: 48/42, Ring 1: 36/30, Ring 2+: gradually smaller
-    const ringLevel = Math.floor(r / RingWidth)
+    // Center: 48/42, Ring 1: 38/32, Ring 2+: gradually smaller (with a floor)
+    const ringLevel = dist
     let borderSize, nodeSize, fontSize
     if (mid === centerId) {
       // Center person: larger size
@@ -1032,14 +1028,15 @@ function computeLayout(members, centerId) {
       nodeSize = 44
       fontSize = 11
     } else if (ringLevel === 1) {
-      borderSize = 36
-      nodeSize = 30
-      fontSize = 9
+      borderSize = 38
+      nodeSize = 32
+      fontSize = 10
     } else {
-      // Gradually reduce size for outer rings (min 20px)
-      borderSize = Math.max(20, 36 - (ringLevel - 1) * 4)
-      nodeSize = Math.max(16, 30 - (ringLevel - 1) * 4)
-      fontSize = Math.max(7, 9 - (ringLevel - 1) * 0.5)
+      // Gradually reduce size for outer rings, but keep a higher floor so outer
+      // nodes stay readable and visually consistent (closer to the example).
+      borderSize = Math.max(28, 40 - ringLevel * 3)
+      nodeSize = Math.max(22, 34 - ringLevel * 3)
+      fontSize = Math.max(8, 10 - ringLevel * 0.4)
     }
 
     // Build a multi-line label: name + relation-to-center + occupation/location.
@@ -1755,14 +1752,17 @@ function computeLayout(members, centerId) {
     }
   }
 
-  // Add background helper rings (concentric circles)
+  // Add background helper rings (concentric circles). Ring gaps grow per level
+  // (gap at level L = RingWidth + L*20), so the cumulative radius at ring i is
+  // i*RingWidth + 10*i*(i-1). Keep the dashed circles aligned with node radii.
   for (let i = 1; i <= maxDistance; i++) {
+    const ringRadius = i * RingWidth + 10 * i * (i - 1)
     echartsNodes.push({
       id: `ring-${i}`,
       x: 0,
       y: 0,
       symbol: 'circle',
-      symbolSize: i * RingWidth * 2,
+      symbolSize: ringRadius * 2,
       itemStyle: {
         color: 'none',
         borderColor: 'rgba(211, 162, 106, 0.15)',
