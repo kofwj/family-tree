@@ -224,7 +224,7 @@ const displayMode = ref('reader')
 const searchKeyword = ref('')
 const branchFilter = ref('all')
 const localFocusMemberId = ref(null)
-const generationLimit = ref('5')
+const generationLimit = ref('3')
 const currentCenterMemberId = ref(null)
 const centerHistoryStack = ref([])
 
@@ -682,6 +682,28 @@ function computeLayout(members, centerId) {
   }
   computeLeafCount(centerId)
 
+  // Approximate border-circle diameter at a given ring level (mirrors the node
+  // sizing logic below). Used to compute spouse angular separation so couples
+  // sit side by side on the same ring without overlapping.
+  function nodeDiameterAt(level) {
+    if (level <= 0) return 56
+    if (level === 1) return 38
+    return Math.max(28, 40 - level * 3)
+  }
+
+  // Angular weight for wedge allocation: a node's subtree leaf count, but at
+  // least (1 + number of same-ring spouses) so a couple always gets enough
+  // width to sit side by side without overlapping a neighbouring family.
+  function spouseCountOf(m) {
+    if (!m || !Array.isArray(m.spouseIds)) return 0
+    return m.spouseIds.map(Number).filter(sid => coords.has(sid) || bfsParent.has(sid)).length
+  }
+  function angularWeight(m) {
+    const base = leafCount.get(Number(m.id)) || 1
+    const spouses = spouseCountOf(m)
+    return Math.max(base, 1 + spouses)
+  }
+
   function assignAngles(nodeId, thetaMin, thetaMax, r, level = 1) {
     const theta = (thetaMin + thetaMax) / 2
     const thetaDegrees = theta * 180 / Math.PI
@@ -718,18 +740,33 @@ function computeLayout(members, centerId) {
       else realChildren.push(child)
     }
 
-    // Place spouses just offset from the parent's angle, on a near-same ring.
-    spouseChildren.forEach((sp, idx) => {
-      const offset = ((idx + 1) * 7) * Math.PI / 180 // 7° per extra spouse
-      assignAngles(sp.id, theta - offset, theta + offset, r + 40, level)
-    })
+    // Place spouses side by side on the SAME ring as the partner (same radius
+    // r), separated by an angular gap derived from node size + arc length so
+    // the avatars never overlap. A red line connects the couple. The gap is
+    // clamped so the spouses stay inside this node's own wedge and never spill
+    // into an adjacent family's sector.
+    if (spouseChildren.length > 0) {
+      const dia = nodeDiameterAt(level)
+      const idealGap = (dia * 1.6) / Math.max(r, 1) // arc length → angle
+      // Keep all spouses within the left half of this wedge (leave 10% margin).
+      const maxGap = (span * 0.45) / spouseChildren.length
+      const angleGap = Math.max(0.02, Math.min(idealGap, maxGap))
+      spouseChildren.forEach((sp, idx) => {
+        const spTheta = theta - angleGap * (idx + 1)
+        const spThetaMin = spTheta - angleGap / 2
+        const spThetaMax = spTheta + angleGap / 2
+        // Same radius r and same level → couple shares the ring.
+        assignAngles(sp.id, spThetaMin, spThetaMax, r, level)
+      })
+    }
 
     if (realChildren.length === 0) return
 
     // Weighted angular distribution: each child's wedge is proportional to the
-    // number of leaves in its subtree, so dense branches get more room and nodes
-    // never overlap. Walk CLOCKWISE (decreasing theta) from thetaMax.
-    const weights = realChildren.map(c => leafCount.get(Number(c.id)) || 1)
+    // number of leaves in its subtree (and at least enough for its own spouses),
+    // so dense branches get more room and nodes never overlap. Walk CLOCKWISE
+    // (decreasing theta) from thetaMax.
+    const weights = realChildren.map(c => angularWeight(c))
     const totalWeight = weights.reduce((a, b) => a + b, 0) || 1
 
     let cursor = thetaMax
@@ -770,9 +807,9 @@ function computeLayout(members, centerId) {
     const span = thetaMax - thetaMin
 
     // Weighted distribution: each member's wedge is proportional to its subtree
-    // leaf count, matching the recursive radial layout. Walk CLOCKWISE
-    // (decreasing theta) from thetaMax so birth order reads clockwise.
-    const weights = nodesList.map(m => leafCount.get(Number(m.id)) || 1)
+    // leaf count (and at least enough for its own spouses), matching the
+    // recursive radial layout. Walk CLOCKWISE (decreasing theta) from thetaMax.
+    const weights = nodesList.map(m => angularWeight(m))
     const totalWeight = weights.reduce((a, b) => a + b, 0) || 1
 
     let cursor = thetaMax
@@ -885,9 +922,10 @@ function computeLayout(members, centerId) {
   // branch with many descendants (e.g. children with large families) gets a
   // proportionally wider sector and its nodes never overlap.
   //
-  // Spouses sit on a slightly larger radius (still the innermost ring) so multiple
-  // partners spread out clockwise in partnership order without overlapping.
-  const spouseRadius = 60 + spousesList.length * 18
+  // Spouses of the center sit on a dedicated inner ring (about half the first
+  // ring radius) so they clear the large center node and have enough arc length
+  // to spread side by side without overlapping.
+  const spouseRadius = Math.round(RingWidth * 0.55)
 
   const sectorGroups = [
     { list: parentsList, r: RingWidth },
@@ -1043,7 +1081,10 @@ function computeLayout(members, centerId) {
     // Outer rings (small nodes) show name only to avoid clutter.
     const relationText = relationToCenter.get(mid) || ''
     const infoText = [m.occupation, m.residence || m.birthPlace].filter(Boolean).join(' · ')
-    const showDetail = ringLevel < 3 && (mid === centerId || isActive || ringLevel <= 2)
+    // Only the center, focused node, and ring 1 show the multi-line detail
+    // (name + relation + occupation/location). Ring 2 onward shows name only,
+    // to keep the diagram clean.
+    const showDetail = mid === centerId || isActive || ringLevel <= 1
     const richLabel = {
       name: { fontSize, fontWeight: mid === centerId ? 'bold' : 'bold', color: '#ffffff', lineHeight: fontSize + 4, textBorderColor: 'rgba(0,0,0,0.8)', textBorderWidth: 2.5 },
       relation: { fontSize: Math.max(7, fontSize - 2), color: '#90caf9', lineHeight: fontSize + 1, textBorderColor: 'rgba(0,0,0,0.7)', textBorderWidth: 2 },
@@ -1906,7 +1947,7 @@ defineExpose({
 
 function resetSunburstView() {
   searchKeyword.value = ''
-  generationLimit.value = '5'
+  generationLimit.value = '3'
   centerHistoryStack.value = []
   currentCenterMemberId.value = findDefaultCenterMember()
   renderChart()
@@ -2502,7 +2543,7 @@ function selectMember(id) {
 function resetReaderFilters() {
   searchKeyword.value = ''
   branchFilter.value = 'all'
-  generationLimit.value = '5'
+  generationLimit.value = '3'
   const first = firstMemberForBranch('all')
   if (first?.id) setLocalFocus(first.id)
 }
