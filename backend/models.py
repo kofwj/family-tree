@@ -65,6 +65,12 @@ class User(SQLModel, table=True):
     member_id: Optional[int] = None
     email: Optional[str] = None
     phone: Optional[str] = None
+    # 微信开放平台网站应用登录字段（unionid 优先用于去重）
+    wechat_unionid: Optional[str] = Field(default=None, unique=True, index=True)
+    wechat_openid: Optional[str] = Field(default=None, index=True)
+    wechat_nickname: Optional[str] = None
+    wechat_avatar_url: Optional[str] = None
+    wechat_last_login_at: Optional[str] = None
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     updated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     last_login_at: Optional[str] = None

@@ -56,6 +56,9 @@ def test_non_admin_cannot_see_unauthorized_families(client, app_module):
     auth_detail_response = client.get(f"/families/{f_auth_id}", headers=auth_headers(viewer_token))
     assert auth_detail_response.status_code == 200
 
+    tree_response = client.get(f"/families/{f_unauth_id}/tree", headers=auth_headers(viewer_token))
+    assert tree_response.status_code == 403
+
 
 def test_non_admin_cannot_read_other_family_users(client, app_module):
     # 1. Create a non-admin user and families

@@ -229,6 +229,8 @@ def get_family_tree(family_id: int, user: main.User = Depends(main.require_capab
         family = session.get(main.FamilyGroup, family_id)
         if not family:
             raise HTTPException(status_code=404, detail='家族不存在')
+        if not main.can_view_family(session, user, family_id):
+            raise HTTPException(status_code=403, detail='当前账号无权查看该家族')
         
         visibility = main.build_member_visibility(session, user)
         default_visible_fields = main.resolve_visible_member_fields(session, user)

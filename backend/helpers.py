@@ -139,6 +139,12 @@ USER_SQLITE_EXTRA_COLUMNS = {
     'created_at': 'TEXT',
     'updated_at': 'TEXT',
     'last_login_at': 'TEXT',
+    # 微信开放平台网站应用字段（扫码登录）
+    'wechat_unionid': 'TEXT',
+    'wechat_openid': 'TEXT',
+    'wechat_nickname': 'TEXT',
+    'wechat_avatar_url': 'TEXT',
+    'wechat_last_login_at': 'TEXT',
 }
 
 AUDIT_LOG_SQLITE_EXTRA_COLUMNS = {
@@ -566,6 +572,14 @@ def ensure_default_admin(session: Session):
 
 def create_token(user: User) -> str:
     exp = datetime.now(timezone.utc) + timedelta(hours=24)
+    return jwt.encode({'sub': user.username, 'uid': user.id, 'role': user.role, 'exp': exp}, main.JWT_SECRET, algorithm=JWT_ALG)
+
+def create_token(user: User) -> str:
+    return create_token_with_expiry(user, hours=24)
+
+
+def create_token_with_expiry(user: User, hours: int = 24) -> str:
+    exp = datetime.now(timezone.utc) + timedelta(hours=hours)
     return jwt.encode({'sub': user.username, 'uid': user.id, 'role': user.role, 'exp': exp}, main.JWT_SECRET, algorithm=JWT_ALG)
 
 def current_user_payload(user: User) -> Dict[str, Any]:
@@ -2424,4 +2438,160 @@ def build_gedcom(session: Session) -> str:
     lines.append('0 TRLR')
     return '\n'.join(lines) + '\n'
 
+
+
+# ==================== 微信开放平台网站应用扫码登录 (Website App) ====================
+
+def get_wechat_web_config():
+    appid = os.getenv("WECHAT_WEB_APPID", "")
+    secret = os.getenv("WECHAT_WEB_APPSECRET", "")
+    redirect_uri = os.getenv("WECHAT_WEB_REDIRECT_URI", "")
+    return appid, secret, redirect_uri
+
+
+def build_wechat_qr_url(state: str) -> str:
+    """构造微信扫码登录 URL（网站应用）"""
+    appid, _, redirect_uri = get_wechat_web_config()
+    if not appid or not redirect_uri:
+        raise RuntimeError("WECHAT_WEB_APPID 或 WECHAT_WEB_REDIRECT_URI 未配置")
+    from urllib.parse import urlencode
+    params = {
+        "appid": appid,
+        "redirect_uri": redirect_uri,
+        "response_type": "code",
+        "scope": "snsapi_login",
+        "state": state,
+    }
+    return "https://open.weixin.qq.com/connect/qrconnect?" + urlencode(params) + "#wechat_redirect"
+
+
+def exchange_wechat_web_code(code: str) -> dict:
+    """用 code 换取 access_token / openid / unionid"""
+    appid, secret, _ = get_wechat_web_config()
+    if not appid or not secret:
+        raise RuntimeError("WECHAT_WEB_APPID / SECRET 未配置")
+    url = "https://api.weixin.qq.com/sns/oauth2/access_token"
+    params = {
+        "appid": appid,
+        "secret": secret,
+        "code": code,
+        "grant_type": "authorization_code",
+    }
+    import requests
+    resp = requests.get(url, params=params, timeout=10)
+    data = resp.json()
+    if "errcode" in data and data.get("errcode") != 0:
+        raise RuntimeError(f"微信换 token 失败: {data}")
+    return data
+
+
+def get_wechat_userinfo(access_token: str, openid: str) -> dict:
+    """获取微信用户信息（昵称、头像、unionid）"""
+    url = "https://api.weixin.qq.com/sns/userinfo"
+    params = {"access_token": access_token, "openid": openid, "lang": "zh_CN"}
+    import requests
+    resp = requests.get(url, params=params, timeout=10)
+    data = resp.json()
+    if "errcode" in data and data.get("errcode") != 0:
+        return {}
+    return data
+
+
+def find_or_create_wechat_user(session, wechat_data: dict, nickname: str = None, avatar: str = None):
+    """根据 unionid 或 openid 查找或创建 User（返回 User 对象）"""
+    from sqlmodel import select
+    unionid = wechat_data.get("unionid")
+    openid = wechat_data.get("openid")
+    if not unionid and not openid:
+        raise RuntimeError("微信返回缺少 openid/unionid")
+
+    user = None
+    if unionid:
+        user = session.exec(select(User).where(User.wechat_unionid == unionid)).first()
+    if not user and openid:
+        user = session.exec(select(User).where(User.wechat_openid == openid)).first()
+
+    if user:
+        user.wechat_openid = openid or user.wechat_openid
+        user.wechat_unionid = unionid or user.wechat_unionid
+        if nickname:
+            user.wechat_nickname = nickname
+        if avatar:
+            user.wechat_avatar_url = avatar
+        user.wechat_last_login_at = datetime.now(timezone.utc).isoformat()
+        session.add(user)
+        session.commit()
+        session.refresh(user)
+        return user
+
+    # 创建新用户
+    base = f"wx_{(unionid or openid)[:8]}"
+    username = base
+    i = 1
+    while session.exec(select(User).where(User.username == username)).first():
+        username = f"{base}_{i}"
+        i += 1
+
+    user = User(
+        username=username,
+        password_hash="",
+        role="viewer",
+        is_active=True,
+        display_name=nickname or f"微信用户{username[-4:]}",
+        wechat_unionid=unionid,
+        wechat_openid=openid,
+        wechat_nickname=nickname,
+        wechat_avatar_url=avatar,
+        wechat_last_login_at=datetime.now(timezone.utc).isoformat(),
+    )
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+    try:
+        main.write_audit_log(session, user, "auth.wechat_login", target_type="user", target_id=str(user.id), target_label=user.username)
+        session.commit()
+    except Exception:
+        pass
+    return user
+
+
+def generate_compliant_password(base_hint: str = None, length: int = 12) -> str:
+    """生成符合强密码规则的密码（至少包含字母+数字+特殊字符，无空格）。
+    可传入姓氏等提示生成相对好记的密码，如 Chen2026!xx
+    """
+    import secrets
+    import string
+
+    if base_hint:
+        base = ''.join(c for c in base_hint if c.isalnum())
+        if len(base) >= 4:
+            base = base[:6].capitalize()
+        else:
+            base = "Family"
+    else:
+        base = "Clan"
+
+    letters = string.ascii_letters
+    digits = string.digits
+    specials = "!@#$%^&*+-=?"
+
+    pwd = base + secrets.choice(digits) + secrets.choice(specials)
+
+    alphabet = letters + digits + specials
+    while len(pwd) < length:
+        pwd += secrets.choice(alphabet)
+
+    pwd_list = list(pwd)
+    secrets.SystemRandom().shuffle(pwd_list)
+    pwd = ''.join(pwd_list)
+
+    # 补齐确保三类字符都有
+    if not any(c.isalpha() for c in pwd):
+        pwd = pwd[:-1] + secrets.choice(letters)
+    if not any(c.isdigit() for c in pwd):
+        pwd = pwd[:-1] + secrets.choice(digits)
+    if not any(c in specials for c in pwd):
+        pwd = pwd[:-1] + secrets.choice(specials)
+
+    return pwd[:length]
 
