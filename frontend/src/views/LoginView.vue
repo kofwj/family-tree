@@ -29,9 +29,9 @@
       </el-form>
     
       <div style="margin-top: 20px; text-align: center; font-size: 12px;">
-        <el-link type="primary" @click="showForgot = true" style="font-size:12px">忘记密码？</el-link>
+        <span @click="showForgot = true" style="color:#409eff; cursor:pointer;">忘记密码？</span>
         &nbsp;&nbsp;
-        <el-link type="success" @click="showRegister = true" style="font-size:12px">有邀请码？自助注册</el-link>
+        <span @click="showRegister = true" style="color:#67c23a; cursor:pointer;">有邀请码？自助注册</span>
       </div>
 
       <!-- 忘记密码弹窗 -->
@@ -87,6 +87,13 @@ const settings = ref({
   subtitle: '承先祖之德 · 启后世之贤',
 })
 const rememberMe = ref(false)
+const showForgot = ref(false)
+const forgotInput = ref('')
+const showRegister = ref(false)
+const regInvite = ref('')
+const regUser = ref('')
+const regPass = ref('')
+const regDisplay = ref('')
 
 onMounted(async () => {
   try {
@@ -138,4 +145,59 @@ async function wechatLogin() {
     wechatLoading.value = false
   }
 }
+
+async function doForgot() {
+  if (!forgotInput.value) {
+    if (window.ElMessage) window.ElMessage.warning('请输入用户名或联系方式')
+    return
+  }
+  try {
+    const { data } = await api.post('/auth/forgot-password', { 
+      username: forgotInput.value, 
+      contact: forgotInput.value 
+    })
+    if (data?.reset_token) {
+      alert('重置码：' + data.reset_token + '\n\n请把这个码告诉用户（有效期6小时）')
+      // 也可以复制到剪贴板
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(data.reset_token).catch(() => {})
+      }
+    } else {
+      if (window.ElMessage) window.ElMessage.success(data?.message || '已生成重置信息')
+    }
+    showForgot.value = false
+    forgotInput.value = ''
+  } catch (e) {
+    if (window.ElMessage) {
+      window.ElMessage.error(e?.response?.data?.detail || '操作失败')
+    } else {
+      alert('操作失败')
+    }
+  }
+}
+
+async function doRegister() {
+  if (!regInvite.value || !regUser.value || !regPass.value) {
+    if (window.ElMessage) window.ElMessage.warning('请填写邀请码、用户名和密码')
+    return
+  }
+  try {
+    await api.post('/auth/register', {
+      inviteCode: regInvite.value,
+      username: regUser.value,
+      password: regPass.value,
+      displayName: regDisplay.value || regUser.value
+    })
+    if (window.ElMessage) window.ElMessage.success('注册成功！请使用新账号登录')
+    showRegister.value = false
+    regInvite.value = regUser.value = regPass.value = regDisplay.value = ''
+  } catch (e) {
+    if (window.ElMessage) {
+      window.ElMessage.error(e?.response?.data?.detail || '注册失败')
+    } else {
+      alert('注册失败: ' + (e?.response?.data?.detail || ''))
+    }
+  }
+}
+
 </script>
